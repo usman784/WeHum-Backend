@@ -22,6 +22,13 @@
       "when": 1791204763493,
       "tag": "0002_program_unlock",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791205798210,
+      "tag": "0003_outbox_notify",
+      "breakpoints": true
     }
   ]
 }

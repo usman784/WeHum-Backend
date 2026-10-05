@@ -8,6 +8,7 @@ import { env } from '../../config/env';
 import { AppError } from '../../common/errors';
 import { refreshTokens, users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
+import { RealtimeBus } from '../../infra/realtime-bus';
 import { K, REDIS } from '../../infra/redis';
 
 type Key = CryptoKey | KeyObject | Uint8Array;
@@ -28,7 +29,7 @@ export class TokensService {
   private kid = env.JWT_KID;
   private pubs = new Map<string, Key>();
 
-  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly bus: RealtimeBus) {}
 
   private async keys() {
     if (this.priv) return this.priv;
@@ -64,8 +65,16 @@ export class TokensService {
     }
   }
 
+  /** Access token for a user as the API would issue it (tests and tools). */
+  async tokenFor(userId: string, ttlSec?: number, over: Partial<AppClaims> = {}) {
+    return this.signAccess({ sub: userId, gst: true, prm: false, ver: await this.tokenVersion(userId), ...over }, 'wehum-app', ttlSec);
+  }
+
   /** Role change / disable / password reset: bumping the admin's token version invalidates every access token issued before. */
-  async revokeAdminAccess(adminId: string) { await this.redis.incr(K.adminRevoked(adminId)); }
+  async revokeAdminAccess(adminId: string) {
+    await this.redis.incr(K.adminRevoked(adminId));
+    await this.bus.publish('force:logout', { scope: 'admin', id: adminId, reason: 'access_changed' }).catch(() => null); // the CMS signs out at once
+  }
 
   async adminVersion(adminId: string): Promise<number> { return Number(await this.redis.get(K.adminRevoked(adminId)).catch(() => 0)) || 0; }
 
@@ -83,6 +92,7 @@ export class TokensService {
     const [u] = await this.db.update(users).set({ tokenVersion: sqlInc() }).where(eq(users.id, userId)).returning({ v: users.tokenVersion });
     await this.redis.del(K.tokenVersion(userId));
     await this.db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+    await this.bus.publish('force:logout', { scope: 'user', id: userId, reason: 'signed_out' }).catch(() => null); // connected apps sign out at once
     return u?.v ?? 0;
   }
 

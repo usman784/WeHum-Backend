@@ -1187,3 +1187,51 @@ Open issues / risks:
 - Bootstrap's `socket.url` is derived from `PUBLIC_API_URL`; staging/prod must set it.
 Evidence: local run above.
 Status: ✅ done
+
+### Phase P5 — Realtime (Socket.IO)
+Date: 2026-10-05
+Built:
+- **Transport**: Socket.IO on the API pods, websocket only, Redis adapter, 16 KB payload limit, 25 s ping / 20 s timeout, connection-state recovery 2 min. Namespaces `/live` (app) and `/admin` (CMS); every client event is acked `{ ok, data } | { ok: false, code }`; 20 events / 10 s / socket (excess dropped with an `error` event).
+- **Auth**: JWT in the handshake. `connect_error.data.code` = `AUTH_REQUIRED | TOKEN_EXPIRED | TOKEN_INVALID | UPDATE_REQUIRED | GONE`. The server emits `auth:expiring` 60 s before the token ends, accepts `auth:refresh`, otherwise sends `error TOKEN_EXPIRED` and disconnects. Revoked token version, deleted user, disabled admin and the wrong audience are refused.
+- **`/live`**: `room:join/leave` (today, world, motd:{date}, session:{id}, lobby:{date}; ≤ 4 rooms; the room's current state is sent right after joining), `time:sync`, `presence:start/beat/stop`, `lobby:join/leave` (members only). Server events: `live:agg`, `session:live`, `motd:stats`, `lobby:state`, `group:start`, `config:changed`, `catalog:changed`, `force:logout` (+ routes for `entitlement:changed`, `inbox:new`, `dedication:*` that P6–P8 emit).
+- **`/admin`**: role-checked `subscribe/unsubscribe` (dashboard, moderation, subscriptions, users, jobs, `entity:{type}:{id}`), `editing:start/stop` with `editing:presence` (one entry per admin, cross-pod via Redis), `entity:changed`, `job:progress` (to `jobs` and to the admin who started the job), `dashboard:kpis` (+ `live:agg`; moderators only get `moderationOpen`), `force:logout`.
+- **Presence engine** (Redis, atomic Lua): a user counts once however many meditations they have; per-country and per-session unique-user counters; 90 s staleness sweep; atomic reconcile every 60 s; privacy: a hidden country is counted as a person and never shown as a country.
+- **Event pipeline**: transactional outbox → relay in every API pod (`FOR UPDATE SKIP LOCKED`, woken by `NOTIFY`, 200 ms poll as safety net) → Redis channel `events` → every pod's router emits to its own sockets (`.local`). The scheduler, the workers and the API all publish to the same channel.
+- **Leader ticker** (scheduler role, Redis lease): presence sweep + `live:agg` / `session:live` only when changed (a final zero for emptied sessions), `lobby:state` (2 s), `motd:stats` (30 s), dashboard KPIs (5 s; MRR estimate from a price table until P6), World Vibration (5 min, EMA), reconcile (60 s), group start scheduling (60 s).
+- **Group start**: a delayed BullMQ job queued 1.5 s before T0, then a timer to the exact instant; announces once (`group:start` to `lobby:{date}`), snapshots the lobby size into `motd_days.group_joined`; a start that was moved in the CMS is recognised as stale. `bumpTokenVersion` and `revokeAdminAccess` now push `force:logout`.
+Tests run (real Postgres, Redis, MinIO; real sockets via `socket.io-client`):
+- `npm run typecheck` clean · `npm run build` OK · `npm test` → 14 files, **220 passed, 0 failed**. P5 adds 55: engine 25 (presence scripts, lobby, ticker, KPIs, vibration, group scheduling), sockets 30.
+- **Socket e2e**: handshake failures (no / garbage / forged / expired / revoked / old version / wrong audience / deleted), websocket-only, `auth:expiring` + refresh + disconnect, time sync, room validation / 4-room limit / snapshot on join, presence over the socket incl. foreign meditations refused and 90 s expiry, lobby (members only, waiting count, regions, leave on disconnect), **`group:start` to 100 clients at T0**, events after commit only (a rolled-back write → no event; a 300-event burst arrives once each, in order), job progress routing, admin role matrix for channels, editing presence across tabs, force logout (app and CMS), rate limit, oversize payload, **two API pods**: exactly-once delivery of events with two relays and two routers, presence on pod A seen on pod B, force logout and admin events across pods, a pod stopping.
+- Also checked with two **separate built processes** (`dist/main.js` on two ports, one client each): 10 outbox events → each client received 10.
+Load test (`scripts/load-presence.ts`, 10,000 sockets, one machine: API + worker + scheduler + Postgres + Redis + the load generator, 100 s, real 30 s beats):
+| Metric | Result | Target |
+|---|---|---|
+| Sockets connected | 10,000 / 10,000 (0 errors, 0 unexpected disconnects) | |
+| Connect p50 / p95 / p99 | 571 / 944 / 1026 ms (during a 500-at-a-time storm) | |
+| `presence:start` ack p50 / p95 / p99 | 64 / 123 / 183 ms | |
+| World sees everyone after the last start | 23 ms | aggregation lag < 6 s |
+| Beats (30 s interval, 100 s run) | 30,000 sent, 0 failed, **0 dropped** (the run is longer than the 90 s expiry) | |
+| Everybody stops → numbers at zero | 1.9 s | |
+| `group:start` to 100 lobby clients | +6…11 ms after T0 (p95 10 ms) | ±50 ms; all < 1 s |
+| Atomic reconcile (Redis blocked) | 50 ms at 10k · 310 ms at 50k active | |
+API process: ~75 % of one core while 10k sockets connect and beat; RSS peaks ~1.0–1.3 GB during the storm and returns to ~90 MB when idle (no leak).
+Bugs found → fixed:
+- The reconcile (counters rebuilt from the active entries) read first and wrote afterwards, so starts that landed in between were lost: the world showed 9,738 instead of 10,000 for up to a minute. It is now one atomic script, with a regression test (reconcile racing 300 starts and 150 stops).
+- `group:start` arrived a constant ~105 ms after T0 (BullMQ delayed-job latency). The job now runs 1.5 s early and waits on a timer: +6…11 ms.
+- The production Docker image had never been built: `npm ci` failed because the lockfile (written by npm 11 on macOS) did not match what Node 22's npm 10 expects (`@emnapi/*`, pulled in by `sharp`), which would also have failed in CI. The lock is now regenerated inside `node:22-bookworm-slim`; the image builds, and a container started from it answers `/readyz`, has ffmpeg 5.1 + ffprobe, and loads `sharp`.
+- Presence start was called with one argument too few (caught by the first engine test run).
+Decisions / deviations from spec:
+- `pz:u:{userId}` is a HASH (meditation → session) instead of a SET, so unique users per session can be counted; `pz:m:*` / `pz:u:*` live 180 s (stale after 90 s) so the sweep can still read what it removes; `pz:sc:{session}` holds the per-session country counts for `session:live`.
+- Country source is the user's profile; "show my country" off → bucket `XX` (counts as a person, never listed).
+- All realtime goes through one Redis channel (`events`); pods emit with `.local` to avoid duplicates from the adapter. Delivery is at-least-once (publish, then mark published); all events only invalidate or patch small values on the clients.
+- `presence:beat` may carry an ack: `NOT_FOUND` tells the app to send `presence:start` again.
+- Lobby: pods refresh their own sockets' scores every 30 s, the leader sweeps entries older than 90 s; `room:join` of a `lobby:` room is the same as `lobby:join` (members only).
+- Dashboard `mrrUsd` uses fixed monthly values of the three products (trials excluded) until RevenueCat data arrives in P6; `moderationOpen` counts auto-flagged dedications until P7.
+- `entity:changed.op` is derived from the audit action (`*.create|invite|duplicate` → create, `*.delete|remove` → delete, else update).
+Open issues / risks:
+- `lobbyTick` reads every waiting member's country each 2 s (fine at thousands; at 50k waiting it should move to incremental counters), and the atomic reconcile blocks Redis ~310 ms per minute at 50k active: both are P10 load-test items (50k sockets, k6).
+- No k6 script yet; the Node generator above is the P5 load tool. The LB compose file (`docker-compose.lb.yml` + nginx, runs the image as `staging`) validates and its image was smoke-tested alone, but the whole stack was not brought up here; the cross-pod behaviour is covered by the two-pod tests and the two-process check.
+- `src/realtime/socket-events.ts` (the contract) gained `force:logout` and `error`; copy it into the CMS and the app.
+- `entitlement:changed`, `inbox:new`, `dedication:*`, `moderation:*`, `subs:event`, `users:new`, `notification:stats` are routed and role-gated but produced by P6–P9.
+Evidence: local run above.
+Status: ✅ done

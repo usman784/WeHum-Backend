@@ -13,3 +13,12 @@ process.env.S3_ACCESS_KEY = 'minio';
 process.env.S3_SECRET_KEY = 'minio12345';
 process.env.FFMPEG_PATH = process.env.FFMPEG_PATH ?? require('ffmpeg-static');
 process.env.FFPROBE_PATH = process.env.FFPROBE_PATH ?? require('@ffprobe-installer/ffprobe').path;
+// One signing key for every pod started in a test (in production the keys come from the environment, shared by all pods).
+{
+  const { createPrivateKey, createPublicKey } = require('node:crypto') as typeof import('node:crypto');
+  const seed = Buffer.alloc(32, 42);
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
+  process.env.JWT_PRIVATE_KEY_B64 = Buffer.from(priv.export({ type: 'pkcs8', format: 'pem' }) as string).toString('base64');
+  process.env.JWT_PUBLIC_KEYS_B64 = Buffer.from(JSON.stringify([{ kid: 'test', pem: createPublicKey(priv).export({ type: 'spki', format: 'pem' }) }])).toString('base64');
+  process.env.JWT_KID = 'test';
+}

@@ -3,6 +3,7 @@ import type Redis from 'ioredis';
 import { K, REDIS } from '../../infra/redis';
 import { ConfigService, type TodayConfig } from '../config/config.service';
 import { liveLine } from '../meditations/meditation.rules';
+import { HIDDEN_COUNTRY } from '../../realtime/presence.service';
 
 /** Matches `LiveAgg` in realtime/socket-events.ts (+ `degraded` when Redis is unreachable). */
 export interface LiveSnapshot {
@@ -27,8 +28,9 @@ export class LiveService {
     const today = await this.config.value<TodayConfig>('today');
     try {
       const [agg, meds, vib] = await Promise.all([this.redis.hgetall(K.aggCountry), this.redis.get(K.medsToday(date)), this.redis.get(K.vibration)]);
-      const entries = Object.entries(agg).map(([c, n]) => ({ c, n: Number(n) })).filter((e) => e.n > 0).sort((a, b) => b.n - a.n || a.c.localeCompare(b.c));
-      const total = entries.reduce((s, e) => s + e.n, 0);
+      const all = Object.entries(agg).map(([c, n]) => ({ c, n: Number(n) })).filter((e) => e.n > 0);
+      const total = all.reduce((s, e) => s + e.n, 0); // everyone counts…
+      const entries = all.filter((e) => e.c !== HIDDEN_COUNTRY).sort((a, b) => b.n - a.n || a.c.localeCompare(b.c)); // …but hidden countries are never shown
       const meditatedToday = Number(meds) || 0;
       return {
         total, countries: entries.length, top: entries.slice(0, 50), quiet: total < today.emptyRoomThreshold, meditatedToday,

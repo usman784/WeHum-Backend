@@ -45,6 +45,7 @@ export interface LiveServerToClient {
   'catalog:changed': (p: { version: number }) => void;
   'auth:expiring': (p: { exp: number }) => void;
   'force:logout': (p: { reason: string }) => void;
+  error: (p: { code: string }) => void;   // RATE_LIMITED, TOKEN_EXPIRED
 }
 
 // ── /admin (CMS)
@@ -71,4 +72,6 @@ export interface AdminServerToClient {
   'editing:presence': (p: { type: EntityType; id: string; admins: { id: string; name: string }[] }) => void;
   'notification:stats': (p: { id: string; delivered: number; opened: number; failed: number }) => void;
   'auth:expiring': (p: { exp: number }) => void;
+  'force:logout': (p: { reason: string }) => void;
+  error: (p: { code: string }) => void;
 }

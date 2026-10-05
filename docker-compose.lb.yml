@@ -1,0 +1,26 @@
+# Two API pods + worker + scheduler behind nginx, on top of the base stack:
+#   docker compose -f docker-compose.yml -f docker-compose.lb.yml up --build
+# Clients use http://localhost:8080 (REST and Socket.IO). An event published on one pod reaches clients on the other.
+x-app: &app
+  build: { context: ., dockerfile: docker/Dockerfile }
+  env_file: [{ path: .env, required: false }]
+  depends_on: [postgres, redis]
+# The image is the production image (dev-only packages are pruned), so it runs as `staging`: run `npm run keys` first
+# (JWT + TOTP keys in .env) and set CDN_SIGNING_SECRET there.
+x-env: &env
+  NODE_ENV: staging
+  CDN_SIGNING_SECRET: ${CDN_SIGNING_SECRET:-local-lb-secret}
+  DATABASE_URL: postgresql://wehum:wehum@postgres:5432/wehum
+  REDIS_URL: redis://redis:6379
+  SMTP_URL: smtp://mailpit:1025
+  S3_ENDPOINT: http://minio:9000
+services:
+  api1: { <<: *app, environment: { <<: *env, APP_ROLE: api, PORT: "3000" } }
+  api2: { <<: *app, environment: { <<: *env, APP_ROLE: api, PORT: "3000" } }
+  worker: { <<: *app, environment: { <<: *env, APP_ROLE: worker } }
+  scheduler: { <<: *app, environment: { <<: *env, APP_ROLE: scheduler } }
+  lb:
+    image: nginx:1.27-alpine
+    volumes: ["./docker/nginx-lb.conf:/etc/nginx/nginx.conf:ro"]
+    ports: ["8080:8080"]
+    depends_on: [api1, api2]

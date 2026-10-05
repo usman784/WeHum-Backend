@@ -10,6 +10,7 @@ import { AppModule } from './app.module';
 import { AppErrorFilter } from './common/error.filter';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { env, isProd } from './config/env';
+import { RedisIoAdapter } from './realtime/redis-io.adapter';
 
 /** Builds the HTTP app (used by main.ts and by e2e tests). */
 export async function createApp(opts: { logger?: boolean } = {}) {
@@ -29,6 +30,9 @@ export async function createApp(opts: { logger?: boolean } = {}) {
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(compress, { encodings: ['br', 'gzip'], threshold: 1024 });
   await app.register(cookie);
+  const io = new RedisIoAdapter(app);
+  await io.connectToRedis(env.REDIS_URL);
+  app.useWebSocketAdapter(io);
   app.enableCors({ origin: env.CMS_ORIGINS.split(',').map((s) => s.trim()), credentials: true });
   app.useGlobalInterceptors(new EnvelopeInterceptor());
   app.useGlobalFilters(new AppErrorFilter());

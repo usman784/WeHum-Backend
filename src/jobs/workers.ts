@@ -1,7 +1,9 @@
-import { Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Worker } from 'bullmq';
 import type Redis from 'ioredis';
 import { env } from '../config/env';
+import { GroupStartService } from '../realtime/group-start.service';
 import { CountersService } from '../modules/meditations/counters.service';
 import { StatsProcessor } from '../modules/meditations/stats.processor';
 import { MediaProcessor } from './media.processor';
@@ -15,7 +17,7 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
   private workers: Worker[] = [];
   private conns: Redis[] = [];
 
-  constructor(private readonly media: MediaProcessor, private readonly publishDue: PublishDueService, private readonly stats: StatsProcessor, private readonly counters: CountersService) {}
+  constructor(private readonly media: MediaProcessor, private readonly publishDue: PublishDueService, private readonly stats: StatsProcessor, private readonly counters: CountersService, private readonly moduleRef: ModuleRef) {}
 
   onModuleInit() { if (env.APP_ROLE === 'worker') this.start(); }
 
@@ -28,6 +30,8 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
       new Worker(QUEUES.cron, async (job) => {
         if (job.name === 'catalog.publishDue') return this.publishDue.run();
         if (job.name === 'counters.flush') return this.counters.flush();
+        // resolved lazily: the realtime module imports this one
+        if (job.name === 'group.start') return this.moduleRef.get(GroupStartService, { strict: false }).fire(job.data.date, job.data.startsAt);
         this.log.warn(`unknown cron job ${job.name}`);
       }, { connection: conn(), concurrency: 1 }),
     ];
