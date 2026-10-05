@@ -48,7 +48,7 @@ export interface LiveServerToClient {
 }
 
 // ── /admin (CMS)
-export type EntityType = 'session' | 'theme' | 'teacher' | 'program' | 'motd' | 'dailyMessage' | 'soundBlock' | 'sos'
+export type EntityType = 'session' | 'media' | 'theme' | 'teacher' | 'program' | 'motd' | 'dailyMessage' | 'soundBlock' | 'sos'
   | 'config' | 'notification' | 'challenge' | 'admin' | 'user';
 
 export interface AdminClientToServer {

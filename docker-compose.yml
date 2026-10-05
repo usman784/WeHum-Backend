@@ -13,11 +13,11 @@ services:
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     ports: ["6379:6379"]
   minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
-    environment: { MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: minio12345 }
+    # minio/minio is no longer published on Docker Hub; this image still is (S3 API :9000, console :9001).
+    image: bitnamilegacy/minio:latest
+    environment: { MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: minio12345, MINIO_DEFAULT_BUCKETS: "wehum-media-dev,wehum-test" }
     ports: ["9000:9000", "9001:9001"]
-    volumes: ["minio:/data"]
+    volumes: ["minio:/bitnami/minio/data"]
   mailpit:
     image: axllent/mailpit
     ports: ["1025:1025", "8025:8025"]

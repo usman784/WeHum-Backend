@@ -16,7 +16,7 @@ No Docker? Install PostgreSQL 16 + Redis locally and set `DATABASE_URL` / `REDIS
 
 | Command | What |
 |---|---|
-| `npm test` | unit + e2e (needs DB `wehum_test`: `createdb -U wehum wehum_test`) |
+| `npm test` | unit + e2e. Needs DB `wehum_test` (`docker compose exec postgres createdb -U wehum wehum_test`), Redis, and MinIO with bucket `wehum-test` (compose creates it). If a port is taken: `TEST_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_S3_ENDPOINT` |
 | `npm run db:generate` | new SQL migration after editing `src/db/schema.ts` |
 | `npm run db:studio` | browse the DB |
 | `npm run dev:worker` / `dev:scheduler` | background jobs / schedules (from P4) |

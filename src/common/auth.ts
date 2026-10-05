@@ -15,6 +15,9 @@ export type AuthedRequest = FastifyRequest & { user?: AppUser; admin?: AdminUser
 
 const MEMBER = 'wh:member', ACCOUNT = 'wh:account', PUBLIC = 'wh:public', OPTIONAL = 'wh:optional', SCOPE = 'wh:scope', ROLES = 'wh:roles', RATE = 'wh:rate', NO_VERSION = 'wh:noversion';
 
+/** Metadata keys, exported so tests can audit every route's guard. */
+export const AUTH_META = { PUBLIC, OPTIONAL, SCOPE, ROLES, MEMBER, ACCOUNT } as const;
+
 /** No token needed. */
 export const Public = () => SetMetadata(PUBLIC, true);
 /** Token read if present (e.g. guest token on login → mergeToken). */
@@ -57,6 +60,7 @@ export class AuthGuard implements CanActivate {
     if (meta<string>(SCOPE) === 'admin') {
       if (!token) throw new AppError('AUTH_REQUIRED');
       const c = await this.tokens.verify<AdminClaims>(token, 'wehum-cms');
+      if (c.ver !== (await this.tokens.adminVersion(c.sub))) throw new AppError('TOKEN_INVALID');
       const roles = meta<AdminClaims['role'][]>(ROLES) ?? [];
       if (roles.length && !roles.includes(c.role)) throw new AppError('FORBIDDEN');
       req.admin = { id: c.sub, role: c.role, name: c.name };

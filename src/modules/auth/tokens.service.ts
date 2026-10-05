@@ -64,6 +64,11 @@ export class TokensService {
     }
   }
 
+  /** Role change / disable / password reset: bumping the admin's token version invalidates every access token issued before. */
+  async revokeAdminAccess(adminId: string) { await this.redis.incr(K.adminRevoked(adminId)); }
+
+  async adminVersion(adminId: string): Promise<number> { return Number(await this.redis.get(K.adminRevoked(adminId)).catch(() => 0)) || 0; }
+
   /** Current token version for force-logout (Redis, falls back to DB). */
   async tokenVersion(userId: string): Promise<number> {
     const v = await this.redis.get(K.tokenVersion(userId)).catch(() => null);

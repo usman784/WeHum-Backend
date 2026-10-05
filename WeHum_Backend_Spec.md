@@ -1105,3 +1105,43 @@ Open issues / risks:
 - Local note: if ports 5432/6379 are used by another stack, run the tests with `TEST_DATABASE_URL` / `TEST_REDIS_URL` pointing at other ports.
 Evidence: local run above.
 Status: ✅ done
+
+### Phase P3 — Admin auth & CMS APIs
+Date: 2026-10-05
+Built:
+- **Admin auth** (`/v1/admin/auth/*`): password → TOTP (mandatory; enrollment with QR URI + 10 hashed recovery codes), access JWT 10 min in memory, refresh token only in the `wh_rt` cookie (httpOnly, Secure, SameSite=Strict, path `/v1/admin/auth`) with double-submit CSRF (`wh_csrf` cookie + `X-CSRF`) and an origin allowlist, rotation, 12 h idle / 7 d absolute, lockout after 5 wrong passwords or codes (15 min, 429 + Retry-After), a TOTP code works only once, forgot/reset (signs out everywhere), invite → accept → enroll, `GET /v1/admin/me` with permissions. TOTP secrets are AES-256-GCM encrypted at rest.
+- **Team** (`/v1/admin/team`): invite (admins cannot invite or touch owners), role change / disable / remove with last-owner and self protection; any change signs the person out (per-admin token version in Redis).
+- **Audit + events**: every mutation runs through `AdminWriter` in one transaction: change + `audit_log` (changed fields only, actor, ip, request id) + `outbox_events` (`entity:changed`, `config:changed`, `catalog:changed`, `job:progress`) + catalog version bump when app content changed; caches are dropped only after commit. `GET /v1/admin/audit` (filters, cursor), `GET /v1/admin/jobs/{id}`.
+- **Content CRUD with If-Match / ETag** (409 `CONFLICT_VERSION` returns the current row): sessions (list with tabs/filters/search/4 keyset sorts, create, get + usage, patch, publish, schedule, archive, duplicate, delete draft, bulk with per-item results, YouTube resolve), themes (incl. reorder, delete with `reassignTo`), teachers, programs (+ days, KPIs), challenges, daily messages, MOTD (range, set, variants 10/30/45, swap; past days locked), sound blocks, SoS (header, help card, tiles ≤ 8), config (`today`, `group` for editors; `main`, `legal`, `moderation`, `sos` for owner/admin; one strict zod schema per key).
+- **Media**: `POST /v1/admin/media/uploads` (S3 multipart, 10 MB parts, presigned URLs, duplicate-checksum warning, size/mime limits), `…/complete` (verifies size, queues a job), `GET /v1/admin/media/{id}`. **Worker pipeline** (BullMQ, `APP_ROLE=worker`): ffprobe, EBU R128 loudness (warns outside −16 ±1 LUFS), loop check (first/last 200 ms), AAC-LC 128 kbps / H.264 MP4 transcode, `sharp` 1200/600/300 WebP + JPEG + blurhash; progress in `jobs` and `job:progress` events; failures end as `failed` with a readable reason.
+- **Scheduler** (`APP_ROLE=scheduler`): Redis leader lease, repeatable `catalog.publishDue` every minute (scheduled sessions go live, one catalog bump).
+Tests run (real Postgres 16, Redis 7, MinIO, ffmpeg/ffprobe):
+- `npm run typecheck` clean · `npm run build` OK.
+- `npm test` → 10 files, **117 passed, 0 failed**. P3 adds 62: admin auth 15, role matrix 4, content 30, media 10, jobs 3.
+- **Role matrix**: the 4 roles × all 64 `/v1/admin/*` routes, read from the controller metadata (a new route without a role declaration fails the suite); allowed roles never get 401/403/5xx, forbidden roles get exactly 403; no token and app tokens get 401; the matrix matches the CMS capability table.
+- **Upload → ready with LUFS**: a 230 s tone uploaded in 3 parts becomes `ready` with measured loudness, 229–231 s, AAC 44.1 kHz stereo in S3; a file normalised to −16 LUFS has no warning; a faded tail fails the loop check; video (h264 + aac, 640×360), image (3 sizes, blurhash), corrupt files fail with a reason; a published session built from uploads plays through `/v1/media/play-url`.
+Performance: P2 numbers unchanged (p95 ≤ 4 ms on catalog / sos / motd / session). Admin lists are not load-tested yet (P10).
+Bugs found → fixed:
+- `npm run dev` (tsx/esbuild) could not resolve class-typed constructor injection (no decorator metadata). It had been broken since P1 because tests (swc) and the build (tsc) both work. Dev scripts now run `@swc-node/register`; all three roles boot.
+- `count(*) filter (…)` comes back from `pg` as a string, so every new theme/program slug got a random suffix. Cast to int.
+- The `Zod` pipe turns an absent optional query value into `{}`, which broke `DELETE /themes/{id}` without `reassignTo`. A query object schema is used instead.
+- The date schema threw `RangeError` (500) on input like `from=garbage`; it now fails validation (400), also in the app's `/v1/motd/{date}`.
+- Revoking admin access by `iat` rejected tokens minted in the same second as a role change. Replaced by a per-admin token version in the claim.
+- Changing the group config left cached MOTD payloads (which embed the group time) stale; they are dropped now.
+- `docker-compose.yml` used `minio/minio`, which is no longer on Docker Hub. It now uses `bitnamilegacy/minio` (same ports); CI got a MinIO service.
+Decisions / deviations from spec:
+- Only the admin routes that belong to P3 exist (auth, team, audit, jobs, content, config, media, YouTube). Dashboard, analytics, moderation, subscriptions, users and notifications come with their phases (P9, P7, P6, P9, P8); the role-matrix test picks them up automatically.
+- `If-Match` is enforced when sent and optional when absent (last write wins); the CMS always sends it.
+- Past MOTD days are read-only, and a session that is a future MOTD cannot be archived (`IN_USE`).
+- Draft edits do not bump the catalog (they are invisible to the app); only live content does.
+- `PUT /config/today` and `PUT /group` are open to editors (content); every other config key is owner/admin.
+- Uploaded originals are kept in S3 (`…/v1/original.*`) next to the processed files; SVG uploads are refused until a sanitizer is added; HLS is not generated yet (`hlsKey` stays empty); voice-only 96 kbps encoding is available in code but not selected automatically.
+- Admin refresh tokens are single-use; a replayed one is simply invalid (no family revocation, so two tabs refreshing at once cannot sign each other out).
+- The scheduler uses BullMQ job schedulers plus a Redis lease; more jobs (§8.7) are added to it in later phases.
+Open issues / risks:
+- `entity:changed` / `catalog:changed` / `config:changed` / `job:progress` events are written to `outbox_events` but only relayed to sockets in P5.
+- `openapi/openapi.yaml` still the hand-written outline (needs `@ApiResponse` DTOs; planned for the contract pass before the CMS client is generated).
+- Real YouTube lookups are untested (fetch is mocked); duration needs `YOUTUBE_API_KEY`.
+- MinIO and ffmpeg are provided by docker/npm for tests; the Docker image installs ffmpeg for production.
+Evidence: local run above; CI now also starts MinIO.
+Status: ✅ done

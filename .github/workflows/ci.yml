@@ -12,6 +12,10 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
+      minio:
+        image: bitnamilegacy/minio:latest
+        env: { MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: minio12345, MINIO_DEFAULT_BUCKETS: wehum-test }
+        ports: ["9000:9000"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
