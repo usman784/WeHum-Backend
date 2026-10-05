@@ -23,7 +23,7 @@ const schema = z.object({
   TOTP_ENC_KEY_BASE64: z.string().default(''),
   MIN_APP_VERSION_IOS: z.string().default('1.0.0'),
   MIN_APP_VERSION_ANDROID: z.string().default('1.0.0'),
-  APPLE_BUNDLE_IDS: z.string().default('com.wehum.app'),
+  APPLE_BUNDLE_IDS: z.string().default('app.wehum.meditation'),
   GOOGLE_CLIENT_IDS: z.string().default(''),
   MAIL_FROM: z.string().default('WeHum <hello@wehum.app>'),
   SMTP_URL: z.string().default(''),
