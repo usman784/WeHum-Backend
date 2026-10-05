@@ -1,0 +1,1637 @@
+openapi: 3.1.0
+info:
+  title: WeHum API
+  version: 1.0.0
+  description: Generated outline — the NestJS app generates the full spec from DTOs (@nestjs/swagger) at /docs; keep this file in sync in CI.
+servers:
+  - url: https://api.wehum.app
+  - url: https://api.staging.wehum.app
+  - url: http://localhost:3000
+security:
+  - bearer: []
+paths:
+  /v1/auth/guest:
+    post:
+      operationId: post_v1_auth_guest
+      tags: ["Auth"]
+      summary: "Create or resume a guest user for this install"
+      description: "Auth: public. body {installId, platform, appVersion, timezone, locale, attestation?}; returns tokens + me. Idempotent per installId"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/refresh:
+    post:
+      operationId: post_v1_auth_refresh
+      tags: ["Auth"]
+      summary: "Rotate refresh token \u2192 new access + refresh"
+      description: "Auth: refresh. reuse of a used token revokes the whole family (401 TOKEN_REUSED)"
+      security: [{refresh: []}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/logout:
+    post:
+      operationId: post_v1_auth_logout
+      tags: ["Auth"]
+      summary: "Revoke this device's refresh family + push token"
+      description: "Auth: device."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/apple:
+    post:
+      operationId: post_v1_auth_apple
+      tags: ["Auth"]
+      summary: "Sign in with Apple (id token + nonce)"
+      description: "Auth: public. returns tokens; body may carry guestMergeToken"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/google:
+    post:
+      operationId: post_v1_auth_google
+      tags: ["Auth"]
+      summary: "Sign in with Google (id token)"
+      description: "Auth: public."
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/email/login:
+    post:
+      operationId: post_v1_auth_email_login
+      tags: ["Auth"]
+      summary: "Email + password login"
+      description: "Auth: public. 5 fails / 15 min / account+IP \u2192 429"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/email/magic-link:
+    post:
+      operationId: post_v1_auth_email_magic_link
+      tags: ["Auth"]
+      summary: "Send sign-in link"
+      description: "Auth: public. always 202 (no account enumeration); 60 s resend cooldown"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/email/verify-link:
+    post:
+      operationId: post_v1_auth_email_verify_link
+      tags: ["Auth"]
+      summary: "Exchange magic-link token for tokens"
+      description: "Auth: public. token single-use, 15 min"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/password/forgot:
+    post:
+      operationId: post_v1_auth_password_forgot
+      tags: ["Auth"]
+      summary: "Send reset email"
+      description: "Auth: public. always 202"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/password/reset:
+    post:
+      operationId: post_v1_auth_password_reset
+      tags: ["Auth"]
+      summary: "Set new password with reset token"
+      description: "Auth: public. revokes all refresh families"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/link/apple:
+    post:
+      operationId: post_v1_auth_link_apple
+      tags: ["Auth"]
+      summary: "Attach Apple identity to current (guest) user"
+      description: "Auth: device. 409 ACCOUNT_EXISTS {mergeToken} if identity belongs to another user"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/link/google:
+    post:
+      operationId: post_v1_auth_link_google
+      tags: ["Auth"]
+      summary: "Attach Google identity to current user"
+      description: "Auth: device. same conflict rule"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/link/email:
+    post:
+      operationId: post_v1_auth_link_email
+      tags: ["Auth"]
+      summary: "Attach email + password to current user"
+      description: "Auth: device. sends verify email"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/auth/merge:
+    post:
+      operationId: post_v1_auth_merge
+      tags: ["Auth"]
+      summary: "Merge a guest's data into the signed-in account"
+      description: "Auth: account. body {mergeToken}; moves meditations, recipes, program progress, stats; deletes guest"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/bootstrap:
+    get:
+      operationId: get_v1_bootstrap
+      tags: ["Bootstrap"]
+      summary: "One call on launch: me, entitlement, config, flags, min versions, catalog version, founding offer, server time"
+      description: "Auth: device. ETag; p95 < 60 ms (Redis)"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/time:
+    get:
+      operationId: get_v1_time
+      tags: ["Bootstrap"]
+      summary: "Server time (ms) for countdown sync"
+      description: "Auth: public. also via socket time:sync"
+      security: []
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me:
+    get:
+      operationId: get_v1_me
+      tags: ["Me"]
+      summary: "Current user + entitlement + settings"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    patch:
+      operationId: patch_v1_me
+      tags: ["Me"]
+      summary: "Update profile/settings"
+      description: "Auth: device. firstName, timezone, locale, country, theme, reminderEnabled, reminderTime, groupWarning, dailyMessagePush, showCountry"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_me
+      tags: ["Me"]
+      summary: "Delete account and all data"
+      description: "Auth: device. account users need recent auth (< 5 min) or password; returns job id"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/progress:
+    get:
+      operationId: get_v1_me_progress
+      tags: ["Me"]
+      summary: "Progress for period=week|month|year|all"
+      description: "Auth: device. minutes, meditations, together, average, daysThisWeek[7], bars[]; no streaks"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/entitlement/sync:
+    post:
+      operationId: post_v1_me_entitlement_sync
+      tags: ["Me"]
+      summary: "Force re-read of RevenueCat subscriber"
+      description: "Auth: device. use after purchase if webhook not arrived yet"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/devices:
+    post:
+      operationId: post_v1_me_devices
+      tags: ["Me"]
+      summary: "Register / update device + push token"
+      description: "Auth: device."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/devices/{id}:
+    delete:
+      operationId: delete_v1_me_devices_id
+      tags: ["Me"]
+      summary: "Remove device push token"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/inbox:
+    get:
+      operationId: get_v1_me_inbox
+      tags: ["Me"]
+      summary: "Notification inbox (cursor)"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/inbox/read:
+    post:
+      operationId: post_v1_me_inbox_read
+      tags: ["Me"]
+      summary: "Mark items read"
+      description: "Auth: device. body {ids[] | all:true}"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/export:
+    post:
+      operationId: post_v1_me_export
+      tags: ["Me"]
+      summary: "Request data export (job \u2192 email link)"
+      description: "Auth: account. 1 per 24 h"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/analytics/events:
+    post:
+      operationId: post_v1_analytics_events
+      tags: ["Me"]
+      summary: "Batch product analytics events (\u2264 50)"
+      description: "Auth: device. fire-and-forget, 202"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/catalog:
+    get:
+      operationId: get_v1_catalog
+      tags: ["Catalog"]
+      summary: "Full catalog snapshot (themes, teachers, sessions, programs, sound blocks, SoS)"
+      description: "Auth: device. ?version= \u2192 304 if unchanged; CDN-cached 5 min, ETag; ~150 KB gz"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/sessions/{id}:
+    get:
+      operationId: get_v1_sessions_id
+      tags: ["Catalog"]
+      summary: "Session detail + practicedToday + dedication preview"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/programs/{id}:
+    get:
+      operationId: get_v1_programs_id
+      tags: ["Catalog"]
+      summary: "Program detail + my progress"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/teachers/{id}:
+    get:
+      operationId: get_v1_teachers_id
+      tags: ["Catalog"]
+      summary: "Teacher bio + sessions"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/sos:
+    get:
+      operationId: get_v1_sos
+      tags: ["Catalog"]
+      summary: "SoS screen: title, subtitle, tiles, help card"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/search:
+    get:
+      operationId: get_v1_search
+      tags: ["Catalog"]
+      summary: "Server search fallback (q, filters)"
+      description: "Auth: device. app searches local catalog first; trigram index"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/today:
+    get:
+      operationId: get_v1_today
+      tags: ["Today"]
+      summary: "Today payload for user's local date"
+      description: "Auth: device. MOTD + variants + live snapshot + group + freePick + program + progress card + daily message line; Redis 30 s per (date, plan)"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/motd/{date}:
+    get:
+      operationId: get_v1_motd_date
+      tags: ["Today"]
+      summary: "MOTD for a date"
+      description: "Auth: device."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/group/next:
+    get:
+      operationId: get_v1_group_next
+      tags: ["Today"]
+      summary: "Next group meditation (startsAt UTC, length, lobby count)"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/live:
+    get:
+      operationId: get_v1_live
+      tags: ["Today"]
+      summary: "Live snapshot fallback when socket is down"
+      description: "Auth: device. total, countries, vibration, quiet flag"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/daily-messages/{date}:
+    get:
+      operationId: get_v1_daily_messages_date
+      tags: ["Today"]
+      summary: "Daily message (falls back to latest earlier)"
+      description: "Auth: member."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/daily-messages:
+    get:
+      operationId: get_v1_daily_messages
+      tags: ["Today"]
+      summary: "Archive (q, theme, cursor)"
+      description: "Auth: member."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/media/play-url:
+    post:
+      operationId: post_v1_media_play_url
+      tags: ["Media"]
+      summary: "Signed CDN URL(s) for a session/variant/block"
+      description: "Auth: device. premium content \u2192 403 PREMIUM_REQUIRED; URL valid 6 h (download: 7 d)"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/meditations:
+    post:
+      operationId: post_v1_meditations
+      tags: ["Meditations"]
+      summary: "Record a meditation (client UUID v7 id)"
+      description: "Auth: device. idempotent by id; server computes counted/localDate; updates stats async"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    get:
+      operationId: get_v1_meditations
+      tags: ["Meditations"]
+      summary: "My history (cursor)"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/meditations/batch:
+    post:
+      operationId: post_v1_meditations_batch
+      tags: ["Meditations"]
+      summary: "Offline sync (\u2264 100)"
+      description: "Auth: device. per-item result"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/recipes:
+    get:
+      operationId: get_v1_recipes
+      tags: ["Recipes"]
+      summary: "My saved meditations (Build your own)"
+      description: "Auth: member."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_recipes
+      tags: ["Recipes"]
+      summary: "Save recipe"
+      description: "Auth: member."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/recipes/{id}:
+    patch:
+      operationId: patch_v1_recipes_id
+      tags: ["Recipes"]
+      summary: "Rename / edit recipe"
+      description: "Auth: member."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_recipes_id
+      tags: ["Recipes"]
+      summary: "Delete recipe"
+      description: "Auth: member."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/recipes/{id}/share:
+    post:
+      operationId: post_v1_recipes_id_share
+      tags: ["Recipes"]
+      summary: "Create share slug \u2192 wehum.app/r/{slug}"
+      description: "Auth: member."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/recipes/shared/{slug}:
+    get:
+      operationId: get_v1_recipes_shared_slug
+      tags: ["Recipes"]
+      summary: "Open shared recipe"
+      description: "Auth: device."
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/programs/{id}/start:
+    post:
+      operationId: post_v1_programs_id_start
+      tags: ["Programs"]
+      summary: "Start program"
+      description: "Auth: member."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/programs/{id}/days/{day}/complete:
+    post:
+      operationId: post_v1_programs_id_days_day_complete
+      tags: ["Programs"]
+      summary: "Complete program day"
+      description: "Auth: member. no rest days / no grace"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: day, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/sessions/{id}/dedications:
+    get:
+      operationId: get_v1_sessions_id_dedications
+      tags: ["Dedications"]
+      summary: "Dedications for a session (cursor, 20)"
+      description: "Auth: device. excludes blocked users; anyone can read"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/dedications:
+    post:
+      operationId: post_v1_dedications
+      tags: ["Dedications"]
+      summary: "Post dedication after a finished meditation"
+      description: "Auth: member+account. body {meditationId, text \u2264 200}; 3/day (DEDICATION_LIMIT); links blocked (DEDICATION_LINKS)"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/dedications/{id}/hold:
+    put:
+      operationId: put_v1_dedications_id_hold
+      tags: ["Dedications"]
+      summary: "\"Holding this\" on"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_dedications_id_hold
+      tags: ["Dedications"]
+      summary: "\"Holding this\" off"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/dedications/{id}/report:
+    post:
+      operationId: post_v1_dedications_id_report
+      tags: ["Dedications"]
+      summary: "Report (reason, block?)"
+      description: "Auth: device. auto-hide at 3 reports"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/blocks:
+    post:
+      operationId: post_v1_blocks
+      tags: ["Dedications"]
+      summary: "Block a user"
+      description: "Auth: device."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/blocks/{userId}:
+    delete:
+      operationId: delete_v1_blocks_userid
+      tags: ["Dedications"]
+      summary: "Unblock"
+      description: "Auth: device."
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /webhooks/revenuecat:
+    post:
+      operationId: post_webhooks_revenuecat
+      tags: ["Webhooks"]
+      summary: "RevenueCat events"
+      description: "Auth: webhook. Authorization header secret; idempotent by event.id; out-of-order safe"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /healthz:
+    get:
+      operationId: get_healthz
+      tags: ["Ops"]
+      summary: "Liveness"
+      description: "Auth: public."
+      security: []
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /readyz:
+    get:
+      operationId: get_readyz
+      tags: ["Ops"]
+      summary: "Readiness (DB, Redis, S3)"
+      description: "Auth: public."
+      security: []
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /metrics:
+    get:
+      operationId: get_metrics
+      tags: ["Ops"]
+      summary: "Prometheus metrics"
+      description: "Auth: internal. private network only"
+      security: []
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/login:
+    post:
+      operationId: post_v1_admin_auth_login
+      tags: ["Admin Auth"]
+      summary: "Email + password \u2192 mfaToken (step 1)"
+      description: "Auth: public. lockout 5 fails / 15 min"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/mfa/verify:
+    post:
+      operationId: post_v1_admin_auth_mfa_verify
+      tags: ["Admin Auth"]
+      summary: "TOTP or recovery code \u2192 access token + refresh cookie"
+      description: "Auth: public."
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/mfa/enroll:
+    post:
+      operationId: post_v1_admin_auth_mfa_enroll
+      tags: ["Admin Auth"]
+      summary: "Enroll TOTP (QR) using enrollToken"
+      description: "Auth: public. mandatory for every admin"
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/refresh:
+    post:
+      operationId: post_v1_admin_auth_refresh
+      tags: ["Admin Auth"]
+      summary: "Rotate refresh (httpOnly cookie)"
+      description: "Auth: refresh. 12 h idle timeout"
+      security: [{refresh: []}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/logout:
+    post:
+      operationId: post_v1_admin_auth_logout
+      tags: ["Admin Auth"]
+      summary: "Sign out"
+      description: "Auth: admin:any."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/forgot:
+    post:
+      operationId: post_v1_admin_auth_forgot
+      tags: ["Admin Auth"]
+      summary: "Reset email"
+      description: "Auth: public."
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/reset:
+    post:
+      operationId: post_v1_admin_auth_reset
+      tags: ["Admin Auth"]
+      summary: "Set password with token"
+      description: "Auth: public."
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/auth/accept-invite:
+    post:
+      operationId: post_v1_admin_auth_accept_invite
+      tags: ["Admin Auth"]
+      summary: "Accept invite, set password, enroll MFA"
+      description: "Auth: public."
+      security: []
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/me:
+    get:
+      operationId: get_v1_admin_me
+      tags: ["Admin Auth"]
+      summary: "Current admin + role + permissions"
+      description: "Auth: admin:any."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/team:
+    get:
+      operationId: get_v1_admin_team
+      tags: ["Team"]
+      summary: "Team members"
+      description: "Auth: admin:owner,admin."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/team/invite:
+    post:
+      operationId: post_v1_admin_team_invite
+      tags: ["Team"]
+      summary: "Invite admin (email, role)"
+      description: "Auth: admin:owner,admin. admin cannot invite owner"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/team/{id}:
+    patch:
+      operationId: patch_v1_admin_team_id
+      tags: ["Team"]
+      summary: "Change role / disable"
+      description: "Auth: admin:owner,admin. last-owner protection"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_admin_team_id
+      tags: ["Team"]
+      summary: "Remove admin"
+      description: "Auth: admin:owner,admin."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/dashboard:
+    get:
+      operationId: get_v1_admin_dashboard
+      tags: ["Dashboard"]
+      summary: "KPIs + needs-attention + top meditations + next group"
+      description: "Auth: admin:owner,admin,editor,moderator. moderator gets moderation KPIs only; live via socket"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/analytics:
+    get:
+      operationId: get_v1_admin_analytics
+      tags: ["Analytics"]
+      summary: "Trends (period 7/30/90, tz UTC|Europe/Berlin)"
+      description: "Auth: admin:owner,admin,editor. reads daily_aggregates only"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/analytics/funnel:
+    get:
+      operationId: get_v1_admin_analytics_funnel
+      tags: ["Analytics"]
+      summary: "Funnel"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/analytics/retention:
+    get:
+      operationId: get_v1_admin_analytics_retention
+      tags: ["Analytics"]
+      summary: "D1/D7/D30 cohorts"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/analytics/export:
+    get:
+      operationId: get_v1_admin_analytics_export
+      tags: ["Analytics"]
+      summary: "CSV export"
+      description: "Auth: admin:owner,admin,editor. streamed"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions:
+    get:
+      operationId: get_v1_admin_sessions
+      tags: ["Sessions"]
+      summary: "List (tab, q, theme, type, teacher, access, status, cursor, sort)"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_sessions
+      tags: ["Sessions"]
+      summary: "Create draft"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions/{id}:
+    get:
+      operationId: get_v1_admin_sessions_id
+      tags: ["Sessions"]
+      summary: "Get (with usage: MOTD dates, programs, dedications count)"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    patch:
+      operationId: patch_v1_admin_sessions_id
+      tags: ["Sessions"]
+      summary: "Update"
+      description: "Auth: admin:owner,admin,editor. If-Match: version \u2192 409 CONFLICT_VERSION"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_admin_sessions_id
+      tags: ["Sessions"]
+      summary: "Delete draft"
+      description: "Auth: admin:owner,admin."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions/{id}/publish:
+    post:
+      operationId: post_v1_admin_sessions_id_publish
+      tags: ["Sessions"]
+      summary: "Publish now"
+      description: "Auth: admin:owner,admin,editor. blocked without ready media (MEDIA_NOT_READY)"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions/{id}/schedule:
+    post:
+      operationId: post_v1_admin_sessions_id_schedule
+      tags: ["Sessions"]
+      summary: "Schedule publishAt"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions/{id}/archive:
+    post:
+      operationId: post_v1_admin_sessions_id_archive
+      tags: ["Sessions"]
+      summary: "Archive"
+      description: "Auth: admin:owner,admin,editor. blocked if used by future MOTD"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions/{id}/duplicate:
+    post:
+      operationId: post_v1_admin_sessions_id_duplicate
+      tags: ["Sessions"]
+      summary: "Duplicate as draft"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sessions/bulk:
+    post:
+      operationId: post_v1_admin_sessions_bulk
+      tags: ["Sessions"]
+      summary: "Bulk publish/archive/change theme"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/youtube/resolve:
+    post:
+      operationId: post_v1_admin_youtube_resolve
+      tags: ["Sessions"]
+      summary: "Resolve YouTube URL \u2192 title, duration, thumbnail"
+      description: "Auth: admin:owner,admin,editor. private/removed \u2192 422 YOUTUBE_UNAVAILABLE"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/media/uploads:
+    post:
+      operationId: post_v1_admin_media_uploads
+      tags: ["Media"]
+      summary: "Start upload \u2192 presigned multipart URLs"
+      description: "Auth: admin:owner,admin,editor. \u2264 500 MB audio/video, 10 MB image"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/media/uploads/{id}/complete:
+    post:
+      operationId: post_v1_admin_media_uploads_id_complete
+      tags: ["Media"]
+      summary: "Complete multipart \u2192 processing job"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/media/{id}:
+    get:
+      operationId: get_v1_admin_media_id
+      tags: ["Media"]
+      summary: "Media status (duration, LUFS, blurhash)"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/themes:
+    get:
+      operationId: get_v1_admin_themes
+      tags: ["Themes"]
+      summary: "List"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_themes
+      tags: ["Themes"]
+      summary: "Create"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/themes/{id}:
+    patch:
+      operationId: patch_v1_admin_themes_id
+      tags: ["Themes"]
+      summary: "Update"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_admin_themes_id
+      tags: ["Themes"]
+      summary: "Delete (reassignTo required if sessions)"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/themes/order:
+    put:
+      operationId: put_v1_admin_themes_order
+      tags: ["Themes"]
+      summary: "Reorder (ids[])"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/teachers:
+    get:
+      operationId: get_v1_admin_teachers
+      tags: ["Teachers"]
+      summary: "List"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_teachers
+      tags: ["Teachers"]
+      summary: "Create"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/teachers/{id}:
+    patch:
+      operationId: patch_v1_admin_teachers_id
+      tags: ["Teachers"]
+      summary: "Update"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/programs:
+    get:
+      operationId: get_v1_admin_programs
+      tags: ["Programs"]
+      summary: "List + KPIs"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_programs
+      tags: ["Programs"]
+      summary: "Create"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/programs/{id}:
+    patch:
+      operationId: patch_v1_admin_programs_id
+      tags: ["Programs"]
+      summary: "Update"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/programs/{id}/days:
+    put:
+      operationId: put_v1_admin_programs_id_days
+      tags: ["Programs"]
+      summary: "Replace day list"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/challenges:
+    get:
+      operationId: get_v1_admin_challenges
+      tags: ["Challenges"]
+      summary: "List (coming soon)"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_challenges
+      tags: ["Challenges"]
+      summary: "Create"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/challenges/{id}:
+    patch:
+      operationId: patch_v1_admin_challenges_id
+      tags: ["Challenges"]
+      summary: "Update"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/daily-messages:
+    get:
+      operationId: get_v1_admin_daily_messages
+      tags: ["Daily Messages"]
+      summary: "Month (from, to)"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/daily-messages/{date}:
+    put:
+      operationId: put_v1_admin_daily_messages_date
+      tags: ["Daily Messages"]
+      summary: "Upsert day"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_admin_daily_messages_date
+      tags: ["Daily Messages"]
+      summary: "Delete day"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/motd:
+    get:
+      operationId: get_v1_admin_motd
+      tags: ["Today Screen"]
+      summary: "MOTD range (from, to) with variant status"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/motd/{date}:
+    put:
+      operationId: put_v1_admin_motd_date
+      tags: ["Today Screen"]
+      summary: "Set session for date"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/motd/{date}/variants/{len}:
+    put:
+      operationId: put_v1_admin_motd_date_variants_len
+      tags: ["Today Screen"]
+      summary: "Attach media for 10/30/45"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+        - {name: len, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/motd/swap:
+    post:
+      operationId: post_v1_admin_motd_swap
+      tags: ["Today Screen"]
+      summary: "Swap two dates"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/config/today:
+    get:
+      operationId: get_v1_admin_config_today
+      tags: ["Today Screen"]
+      summary: "Today rules (threshold, free layout, daily message toggle)"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    put:
+      operationId: put_v1_admin_config_today
+      tags: ["Today Screen"]
+      summary: "Save today rules"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/group:
+    get:
+      operationId: get_v1_admin_group
+      tags: ["Group Meditation"]
+      summary: "Group config + history"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    put:
+      operationId: put_v1_admin_group
+      tags: ["Group Meditation"]
+      summary: "Save start time UTC, length, lobby/reminder minutes"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sound-blocks:
+    get:
+      operationId: get_v1_admin_sound_blocks
+      tags: ["Sounds"]
+      summary: "List by kind"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_sound_blocks
+      tags: ["Sounds"]
+      summary: "Create"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sound-blocks/{id}:
+    patch:
+      operationId: patch_v1_admin_sound_blocks_id
+      tags: ["Sounds"]
+      summary: "Update"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sound-blocks/order:
+    put:
+      operationId: put_v1_admin_sound_blocks_order
+      tags: ["Sounds"]
+      summary: "Reorder"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sos:
+    get:
+      operationId: get_v1_admin_sos
+      tags: ["SoS"]
+      summary: "Tiles + header + help card"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    put:
+      operationId: put_v1_admin_sos
+      tags: ["SoS"]
+      summary: "Save header + help card (booking URL, contact email)"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/sos/order:
+    put:
+      operationId: put_v1_admin_sos_order
+      tags: ["SoS"]
+      summary: "Reorder tiles (max 8)"
+      description: "Auth: admin:owner,admin,editor."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/moderation:
+    get:
+      operationId: get_v1_admin_moderation
+      tags: ["Moderation"]
+      summary: "Queue (filter, sessionId, cursor)"
+      description: "Auth: admin:owner,admin,moderator."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/moderation/{id}/hide:
+    post:
+      operationId: post_v1_admin_moderation_id_hide
+      tags: ["Moderation"]
+      summary: "Hide post"
+      description: "Auth: admin:owner,admin,moderator."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/moderation/{id}/keep:
+    post:
+      operationId: post_v1_admin_moderation_id_keep
+      tags: ["Moderation"]
+      summary: "Keep (clear flags)"
+      description: "Auth: admin:owner,admin,moderator."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/moderation/bulk:
+    post:
+      operationId: post_v1_admin_moderation_bulk
+      tags: ["Moderation"]
+      summary: "Bulk hide/keep"
+      description: "Auth: admin:owner,admin,moderator."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/users/{id}/mute:
+    post:
+      operationId: post_v1_admin_users_id_mute
+      tags: ["Moderation"]
+      summary: "Mute user in feed"
+      description: "Auth: admin:owner,admin,moderator."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/moderation/rules:
+    get:
+      operationId: get_v1_admin_moderation_rules
+      tags: ["Moderation"]
+      summary: "Rules"
+      description: "Auth: admin:owner,admin,moderator."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    put:
+      operationId: put_v1_admin_moderation_rules
+      tags: ["Moderation"]
+      summary: "Save rules (limit, auto-hide N, word lists)"
+      description: "Auth: admin:owner,admin."
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/subscriptions/summary:
+    get:
+      operationId: get_v1_admin_subscriptions_summary
+      tags: ["Subscriptions"]
+      summary: "KPIs + founding counter"
+      description: "Auth: admin:owner,admin,editor(read)."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/subscriptions/members:
+    get:
+      operationId: get_v1_admin_subscriptions_members
+      tags: ["Subscriptions"]
+      summary: "Members (tab, cursor)"
+      description: "Auth: admin:owner,admin,editor(read)."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/subscriptions/events:
+    get:
+      operationId: get_v1_admin_subscriptions_events
+      tags: ["Subscriptions"]
+      summary: "Event feed (cursor)"
+      description: "Auth: admin:owner,admin,editor(read)."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/offers/founding/close:
+    post:
+      operationId: post_v1_admin_offers_founding_close
+      tags: ["Subscriptions"]
+      summary: "End Founding offer now"
+      description: "Auth: admin:owner,admin. switches RC current offering to regular"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/users:
+    get:
+      operationId: get_v1_admin_users
+      tags: ["Users"]
+      summary: "Search + tabs (cursor)"
+      description: "Auth: admin:owner,admin,editor(read). q matches email prefix / name trigram / id"
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/users/{id}:
+    get:
+      operationId: get_v1_admin_users_id
+      tags: ["Users"]
+      summary: "User detail"
+      description: "Auth: admin:owner,admin,editor(read)."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_admin_users_id
+      tags: ["Users"]
+      summary: "Delete account + data (job)"
+      description: "Auth: admin:owner,admin. typed confirmation token required"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/users/{id}/gift:
+    post:
+      operationId: post_v1_admin_users_id_gift
+      tags: ["Users"]
+      summary: "Gift premium N days (RC promotional)"
+      description: "Auth: admin:owner,admin."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/users/{id}/export:
+    post:
+      operationId: post_v1_admin_users_id_export
+      tags: ["Users"]
+      summary: "Export user data (job)"
+      description: "Auth: admin:owner,admin."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/users/export:
+    get:
+      operationId: get_v1_admin_users_export
+      tags: ["Users"]
+      summary: "CSV export (job)"
+      description: "Auth: admin:owner,admin."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications:
+    get:
+      operationId: get_v1_admin_notifications
+      tags: ["Notifications"]
+      summary: "Sent + scheduled history"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: post_v1_admin_notifications
+      tags: ["Notifications"]
+      summary: "Create draft"
+      description: "Auth: admin:owner,admin,editor. editor: draft only"
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications/{id}:
+    patch:
+      operationId: patch_v1_admin_notifications_id
+      tags: ["Notifications"]
+      summary: "Edit draft/scheduled"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications/{id}/test:
+    post:
+      operationId: post_v1_admin_notifications_id_test
+      tags: ["Notifications"]
+      summary: "Send test to me"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications/{id}/send:
+    post:
+      operationId: post_v1_admin_notifications_id_send
+      tags: ["Notifications"]
+      summary: "Send / schedule"
+      description: "Auth: admin:owner,admin. audience preview count returned first"
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications/{id}/cancel:
+    post:
+      operationId: post_v1_admin_notifications_id_cancel
+      tags: ["Notifications"]
+      summary: "Cancel scheduled"
+      description: "Auth: admin:owner,admin."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications/automatic:
+    get:
+      operationId: get_v1_admin_notifications_automatic
+      tags: ["Notifications"]
+      summary: "Automatic notifications"
+      description: "Auth: admin:owner,admin,editor."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/notifications/automatic/{key}:
+    patch:
+      operationId: patch_v1_admin_notifications_automatic_key
+      tags: ["Notifications"]
+      summary: "Edit copy / toggle"
+      description: "Auth: admin:owner,admin."
+      parameters:
+        - {name: key, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/config:
+    get:
+      operationId: get_v1_admin_config
+      tags: ["Settings"]
+      summary: "All settings (general, releases, flags, legal)"
+      description: "Auth: admin:owner,admin."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/config/{key}:
+    put:
+      operationId: put_v1_admin_config_key
+      tags: ["Settings"]
+      summary: "Save one settings group"
+      description: "Auth: admin:owner,admin. bumps config version \u2192 socket config:changed"
+      parameters:
+        - {name: key, in: path, required: true, schema: {type: string}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/audit:
+    get:
+      operationId: get_v1_admin_audit
+      tags: ["Settings"]
+      summary: "Audit log (filters, cursor)"
+      description: "Auth: admin:owner,admin."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/jobs/{id}:
+    get:
+      operationId: get_v1_admin_jobs_id
+      tags: ["Jobs"]
+      summary: "Job status"
+      description: "Auth: admin:owner,admin,editor,moderator."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+    refresh: {type: apiKey, in: header, name: X-Refresh-Token, description: 'App sends refresh token in body/header; CMS uses httpOnly cookie wh_rt'}
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        data: {}
+        meta:
+          type: object
+          properties:
+            nextCursor: {type: [string, 'null']}
+            version: {type: integer}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, traceId]
+          properties:
+            code: {type: string, example: PREMIUM_REQUIRED}
+            message: {type: string}
+            details: {}
+            traceId: {type: string}

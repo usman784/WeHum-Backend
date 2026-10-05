@@ -1,0 +1,941 @@
+// WeHum — PostgreSQL schema (Prisma). Authoritative data model.
+// Conventions: UUID v7 ids (time-ordered, generated in app via `uuidv7()`), snake_case tables/columns,
+// all timestamps `timestamptz` UTC, soft-delete only where stated, `version` int for optimistic locking on CMS-edited rows.
+// Heavy analytics use raw SQL (see backend spec §6.4); hot counters live in Redis and are flushed here.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DATABASE_DIRECT_URL")
+  extensions = [citext, pg_trgm]
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum ThemePref {
+  dark
+  light
+  system
+}
+
+enum AuthProvider {
+  device   // guest (anonymous) — install id
+  apple
+  google
+  email
+}
+
+enum Platform {
+  ios
+  android
+}
+
+enum Store {
+  app_store
+  play_store
+  promotional
+  stripe
+}
+
+enum PeriodType {
+  trial
+  normal
+  intro
+  promotional
+}
+
+enum SessionType {
+  audio
+  video
+  youtube
+}
+
+enum Access {
+  free
+  premium
+}
+
+enum ContentStatus {
+  draft
+  scheduled
+  live
+  archived
+}
+
+enum MeditationKind {
+  motd
+  group
+  solo
+  silence
+  custom
+  program
+  sos
+  free
+}
+
+enum MessageType {
+  audio
+  video
+  text
+}
+
+enum BlockKind {
+  opening
+  core
+  closing
+  sound
+  bell
+  loop
+}
+
+enum DedicationStatus {
+  visible
+  hidden
+  flagged
+}
+
+enum AdminRole {
+  owner
+  admin
+  editor
+  moderator
+}
+
+enum AdminStatus {
+  invited
+  active
+  disabled
+}
+
+enum JobType {
+  media_probe
+  media_loudness
+  media_transcode
+  image_process
+  youtube_resolve
+  user_export
+  user_delete
+  push_send
+  rc_reconcile
+}
+
+enum JobStatus {
+  queued
+  running
+  done
+  failed
+  cancelled
+}
+
+enum NotificationStatus {
+  draft
+  scheduled
+  sending
+  sent
+  cancelled
+  failed
+}
+
+enum Audience {
+  all
+  members
+  free
+  trial
+  guests
+  country
+}
+
+enum SendMode {
+  now
+  user_reminder_time
+  scheduled
+}
+
+enum EmailTokenPurpose {
+  verify
+  magic_link
+  password_reset
+  admin_invite
+  admin_reset
+}
+
+enum MediaStatus {
+  uploading
+  processing
+  ready
+  failed
+}
+
+enum ChallengeCounts {
+  any
+  sleep
+  group
+}
+
+// ───────────────────────────── Users & auth ─────────────────────────────
+
+model User {
+  id               String    @id @db.Uuid
+  firstName        String?   @map("first_name") @db.VarChar(30)
+  email            String?   @unique @db.Citext
+  emailVerifiedAt  DateTime? @map("email_verified_at") @db.Timestamptz(3)
+  isGuest          Boolean   @default(true) @map("is_guest")
+  country          String?   @db.Char(2) // ISO-3166-1 alpha-2 (from IP at signup, user can hide)
+  timezone         String    @default("UTC") @db.VarChar(64) // IANA
+  locale           String    @default("en") @db.VarChar(10)
+  theme            ThemePref @default(dark)
+  reminderEnabled  Boolean   @default(true) @map("reminder_enabled")
+  reminderTime     String    @default("07:00") @map("reminder_time") @db.Char(5) // local HH:mm
+  groupWarning     Boolean   @default(false) @map("group_warning")
+  dailyMessagePush Boolean   @default(true) @map("daily_message_push")
+  showCountry      Boolean   @default(true) @map("show_country")
+  mutedAt          DateTime? @map("muted_at") @db.Timestamptz(3) // muted in dedication feed
+  tokenVersion     Int       @default(0) @map("token_version") // bump = force logout (mirrored in Redis tv:{id})
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  lastActiveAt     DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  identities      AuthIdentity[]
+  devices         Device[]
+  refreshTokens   RefreshToken[]
+  entitlement     Entitlement?
+  stats           UserStats?
+  dailyStats      UserDailyStat[]
+  meditations     Meditation[]
+  recipes         Recipe[]
+  programProgress ProgramProgress[]
+  dedications     Dedication[]
+  holds           DedicationHold[]
+  reports         Report[]
+  blocksMade      UserBlock[]       @relation("blocker")
+  blocksReceived  UserBlock[]       @relation("blocked")
+  inbox           InboxItem[]
+  subEvents       SubscriptionEvent[]
+  challengeRuns   ChallengeParticipant[]
+
+  @@index([isGuest, createdAt(sort: Desc)])
+  @@index([lastActiveAt(sort: Desc)])
+  @@index([timezone, reminderTime], map: "users_reminder_idx") // push scheduler (§8.3)
+  @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_first_name_trgm")
+  @@map("users")
+}
+
+model AuthIdentity {
+  id           String       @id @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  provider     AuthProvider
+  providerUid  String       @map("provider_uid") @db.VarChar(255) // install id / apple sub / google sub / email
+  passwordHash String?      @map("password_hash") // argon2id (email provider only)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUid])
+  @@index([userId])
+  @@map("auth_identities")
+}
+
+model Device {
+  id         String    @id @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  installId  String    @unique @map("install_id") @db.VarChar(64)
+  platform   Platform
+  pushToken  String?   @unique @map("push_token") @db.VarChar(512)
+  appVersion String    @map("app_version") @db.VarChar(20)
+  osVersion  String?   @map("os_version") @db.VarChar(40)
+  model      String?   @db.VarChar(80)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
+}
+
+/// Rotating refresh tokens with reuse detection (family revoked on reuse).
+model RefreshToken {
+  id         String    @id @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  familyId   String    @map("family_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.Char(64) // sha256
+  deviceId   String?   @map("device_id") @db.Uuid
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt     DateTime? @map("used_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model EmailToken {
+  id        String            @id @db.Uuid
+  purpose   EmailTokenPurpose
+  email     String            @db.Citext
+  userId    String?           @map("user_id") @db.Uuid
+  adminId   String?           @map("admin_id") @db.Uuid
+  tokenHash String            @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime          @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime?         @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([email, purpose])
+  @@map("email_tokens")
+}
+
+/// Mirror of RevenueCat entitlement `premium`. Source of truth = RevenueCat (webhook + REST reconcile).
+model Entitlement {
+  userId       String      @id @map("user_id") @db.Uuid
+  active       Boolean     @default(false)
+  productId    String?     @map("product_id") @db.VarChar(80)
+  store        Store?
+  periodType   PeriodType? @map("period_type")
+  startedAt    DateTime?   @map("started_at") @db.Timestamptz(3)
+  expiresAt    DateTime?   @map("expires_at") @db.Timestamptz(3)
+  willRenew    Boolean     @default(false) @map("will_renew")
+  billingIssue Boolean     @default(false) @map("billing_issue")
+  isFounding   Boolean     @default(false) @map("is_founding")
+  lastEventAt  DateTime?   @map("last_event_at") @db.Timestamptz(3) // out-of-order protection
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([active, periodType])
+  @@index([productId])
+  @@map("entitlements")
+}
+
+model UserStats {
+  userId           String   @id @map("user_id") @db.Uuid
+  minutesTotal     Int      @default(0) @map("minutes_total")
+  meditationsTotal Int      @default(0) @map("meditations_total")
+  groupTotal       Int      @default(0) @map("group_total")
+  dedicationsTotal Int      @default(0) @map("dedications_total")
+  firstMeditationAt DateTime? @map("first_meditation_at") @db.Timestamptz(3)
+  lastMeditationAt DateTime? @map("last_meditation_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_stats")
+}
+
+/// One row per user per LOCAL date. Week/month/year progress = SUM over a date range (tiny index scan).
+model UserDailyStat {
+  userId      String   @map("user_id") @db.Uuid
+  localDate   DateTime @map("local_date") @db.Date
+  minutes     Int      @default(0)
+  meditations Int      @default(0)
+  groupCount  Int      @default(0) @map("group_count")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, localDate])
+  @@map("user_daily_stats")
+}
+
+// ───────────────────────────── Content ─────────────────────────────
+
+model Theme {
+  id          String   @id @db.Uuid
+  slug        String   @unique @db.VarChar(60)
+  name        String   @db.VarChar(60)
+  subtitle    String?  @db.VarChar(120)
+  description String?  @db.Text
+  iconKey     String?  @map("icon_key") @db.VarChar(40)
+  iconMediaId String?  @map("icon_media_id") @db.Uuid
+  order       Int      @default(0)
+  visible     Boolean  @default(true)
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions    Session[]
+
+  @@index([visible, order])
+  @@map("themes")
+}
+
+model Teacher {
+  id            String   @id @db.Uuid
+  name          String   @db.VarChar(80)
+  role          String?  @db.VarChar(80)
+  specialty     String?  @db.VarChar(120)
+  bio           String?  @db.Text
+  quote         String?  @db.VarChar(280)
+  photoMediaId  String?  @map("photo_media_id") @db.Uuid
+  youtubeUrl    String?  @map("youtube_url")
+  instagramUrl  String?  @map("instagram_url")
+  websiteUrl    String?  @map("website_url")
+  visible       Boolean  @default(true)
+  canLeadGroup  Boolean  @default(false) @map("can_lead_group")
+  adminId       String?  @unique @map("admin_id") @db.Uuid // has CMS login
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions      Session[]
+
+  @@map("teachers")
+}
+
+model MediaAsset {
+  id           String      @id @db.Uuid
+  kind         String      @db.VarChar(20) // audio | video | image | svg
+  storageKey   String      @unique @map("storage_key") // s3 key, versioned path
+  originalName String?     @map("original_name")
+  mime         String      @db.VarChar(80)
+  bytes        BigInt      @default(0)
+  checksum     String?     @db.Char(64) // sha256 for duplicate detection
+  durationSec  Int?        @map("duration_sec")
+  loudnessLufs Decimal?    @map("loudness_lufs") @db.Decimal(5, 2)
+  width        Int?
+  height       Int?
+  blurhash     String?     @db.VarChar(64)
+  hlsKey       String?     @map("hls_key") // optional HLS manifest
+  status       MediaStatus @default(uploading)
+  error        String?
+  createdBy    String?     @map("created_by") @db.Uuid // admin id
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([checksum])
+  @@map("media_assets")
+}
+
+model Session {
+  id            String        @id @db.Uuid
+  slug          String        @unique @db.VarChar(120)
+  title         String        @db.VarChar(120)
+  description   String?       @db.Text
+  type          SessionType
+  access        Access        @default(premium)
+  themeId       String?       @map("theme_id") @db.Uuid
+  teacherId     String?       @map("teacher_id") @db.Uuid
+  tags          String[]      @default([])
+  durationSec   Int           @map("duration_sec")
+  mediaId       String?       @map("media_id") @db.Uuid // audio/video
+  youtubeId     String?       @map("youtube_id") @db.VarChar(20)
+  coverMediaId  String?       @map("cover_media_id") @db.Uuid
+  coverUrl      String?       @map("cover_url") // youtube thumb fallback
+  downloadable  Boolean       @default(true)
+  isSos         Boolean       @default(false) @map("is_sos")
+  sosFeeling    String?       @map("sos_feeling") @db.VarChar(40)
+  sosSubtitle   String?       @map("sos_subtitle") @db.VarChar(80)
+  sosOrder      Int?          @map("sos_order")
+  status        ContentStatus @default(draft)
+  publishAt     DateTime?     @map("publish_at") @db.Timestamptz(3)
+  plays         Int           @default(0)
+  completions   Int           @default(0)
+  version       Int           @default(1)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy     String?       @map("updated_by") @db.Uuid
+
+  theme        Theme?        @relation(fields: [themeId], references: [id], onDelete: SetNull)
+  teacher      Teacher?      @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  motdDays     MotdDay[]
+  programDays  ProgramDay[]
+  dedications  Dedication[]
+  meditations  Meditation[]
+
+  @@index([status, publishAt])
+  @@index([themeId, status])
+  @@index([access, status])
+  @@index([isSos, sosOrder])
+  @@index([tags], type: Gin)
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "sessions_title_trgm")
+  @@map("sessions")
+}
+
+model Program {
+  id          String        @id @db.Uuid
+  slug        String        @unique @db.VarChar(120)
+  title       String        @db.VarChar(120)
+  description String?       @db.Text
+  coverMediaId String?      @map("cover_media_id") @db.Uuid
+  access      Access        @default(premium)
+  unlockRule  String        @default("next_day_0700") @map("unlock_rule") @db.VarChar(30) // next_day_0700 | after_previous | all_at_once
+  status      ContentStatus @default(draft)
+  version     Int           @default(1)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  days        ProgramDay[]
+  progress    ProgramProgress[]
+
+  @@map("programs")
+}
+
+model ProgramDay {
+  programId String  @map("program_id") @db.Uuid
+  day       Int
+  sessionId String  @map("session_id") @db.Uuid
+  title     String? @db.VarChar(120)
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@id([programId, day])
+  @@map("program_days")
+}
+
+model ProgramProgress {
+  userId        String    @map("user_id") @db.Uuid
+  programId     String    @map("program_id") @db.Uuid
+  startedAt     DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  currentDay    Int       @default(1) @map("current_day")
+  completedDays Int[]     @default([]) @map("completed_days")
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(3)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program       Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@id([userId, programId])
+  @@map("program_progress")
+}
+
+/// Coming soon (feature flag `challenges`).
+model Challenge {
+  id          String          @id @db.Uuid
+  name        String          @db.VarChar(80)
+  days        Int
+  counts      ChallengeCounts @default(any)
+  minMinutes  Int             @default(3) @map("min_minutes")
+  membersOnly Boolean         @default(true) @map("members_only")
+  showOnYou   Boolean         @default(true) @map("show_on_you")
+  coverMediaId String?        @map("cover_media_id") @db.Uuid
+  startsAt    DateTime?       @map("starts_at") @db.Timestamptz(3)
+  status      ContentStatus   @default(draft)
+  version     Int             @default(1)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  participants ChallengeParticipant[]
+
+  @@map("challenges")
+}
+
+model ChallengeParticipant {
+  challengeId   String    @map("challenge_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  joinedAt      DateTime  @default(now()) @map("joined_at") @db.Timestamptz(3)
+  completedDays Int       @default(0) @map("completed_days")
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(3)
+  challenge     Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([challengeId, userId])
+  @@map("challenge_participants")
+}
+
+/// Meditation of the Day. `date` is the content day (same calendar date worldwide; each user sees it on their local date).
+model MotdDay {
+  date           DateTime  @id @db.Date
+  sessionId      String    @map("session_id") @db.Uuid
+  groupStartUtc  String?   @map("group_start_utc") @db.Char(5) // "16:00" (null = use group_config default)
+  groupLengthMin Int?      @map("group_length_min") // 10 | 30 | 45
+  practicedToday Int       @default(0) @map("practiced_today") // flushed from Redis every 60 s
+  groupJoined    Int       @default(0) @map("group_joined")
+  soloCount      Int       @default(0) @map("solo_count")
+  version        Int       @default(1)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  session        Session   @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  variants       MotdVariant[]
+
+  @@index([sessionId])
+  @@map("motd_days")
+}
+
+model MotdVariant {
+  date      DateTime @db.Date
+  lengthMin Int      @map("length_min") // 10 | 30 | 45 (CHECK constraint in migration)
+  mediaId   String   @map("media_id") @db.Uuid
+  motd      MotdDay  @relation(fields: [date], references: [date], onDelete: Cascade)
+
+  @@id([date, lengthMin])
+  @@map("motd_variants")
+}
+
+model DailyMessage {
+  date         DateTime      @id @db.Date
+  type         MessageType
+  title        String        @db.VarChar(120)
+  text         String?       @db.Text
+  mediaId      String?       @map("media_id") @db.Uuid
+  imageMediaId String?       @map("image_media_id") @db.Uuid
+  durationSec  Int?          @map("duration_sec")
+  themeTag     String?       @map("theme_tag") @db.VarChar(40)
+  status       ContentStatus @default(draft)
+  version      Int           @default(1)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, date(sort: Desc)])
+  @@index([themeTag, date(sort: Desc)])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "daily_messages_title_trgm")
+  @@map("daily_messages")
+}
+
+model SoundBlock {
+  id           String    @id @db.Uuid
+  kind         BlockKind
+  name         String    @db.VarChar(80)
+  mediaId      String    @map("media_id") @db.Uuid
+  durationSec  Int       @map("duration_sec")
+  loopable     Boolean   @default(false)
+  loudnessLufs Decimal?  @map("loudness_lufs") @db.Decimal(5, 2)
+  access       Access    @default(premium)
+  order        Int       @default(0)
+  visible      Boolean   @default(true)
+  version      Int       @default(1)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([kind, visible, order])
+  @@map("sound_blocks")
+}
+
+// ───────────────────────────── User activity ─────────────────────────────
+
+/// One row per meditation. id is generated on the device (UUID v7) → idempotent offline sync.
+/// Partition by month (RANGE on started_at) once > 50M rows (see spec §6.5).
+model Meditation {
+  id            String         @id @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  sessionId     String?        @map("session_id") @db.Uuid
+  recipeId      String?        @map("recipe_id") @db.Uuid
+  kind          MeditationKind
+  lengthVariant Int?           @map("length_variant")
+  startedAt     DateTime       @map("started_at") @db.Timestamptz(3)
+  endedAt       DateTime       @map("ended_at") @db.Timestamptz(3)
+  durationSec   Int            @map("duration_sec")
+  counted       Boolean        @default(false) // ≥ 3 min or ≥ 50 % of shorter
+  completed     Boolean        @default(false)
+  offline       Boolean        @default(false)
+  localDate     DateTime       @map("local_date") @db.Date
+  country       String?        @db.Char(2)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session       Session?       @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([sessionId, startedAt])
+  @@index([startedAt])
+  @@map("meditations")
+}
+
+model Recipe {
+  id          String    @id @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  name        String    @db.VarChar(60)
+  lengthMin   Int       @map("length_min")
+  openingId   String?   @map("opening_id") @db.Uuid
+  soundId     String?   @map("sound_id") @db.Uuid
+  soundLevel  Int       @default(50) @map("sound_level")
+  texture     String    @default("simple") @db.VarChar(10) // simple | rich
+  bells       Json      @default("{\"start\":true,\"end\":true,\"intervalMin\":0}")
+  blocks      Json      @default("[]") // advanced: [{blockId, repeat, gapSec}]
+  shareSlug   String?   @unique @map("share_slug") @db.VarChar(16)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("recipes")
+}
+
+// ───────────────────────────── Community ─────────────────────────────
+
+model Dedication {
+  id           String           @id @db.Uuid
+  sessionId    String           @map("session_id") @db.Uuid
+  userId       String           @map("user_id") @db.Uuid
+  meditationId String           @unique @map("meditation_id") @db.Uuid // one dedication per finished meditation
+  firstName    String           @map("first_name") @db.VarChar(30) // snapshot
+  country      String?          @db.Char(2)
+  text         String           @db.VarChar(200)
+  status       DedicationStatus @default(visible)
+  autoFlags    String[]         @default([]) @map("auto_flags") // profanity | link | crisis | spam
+  reportCount  Int              @default(0) @map("report_count")
+  holdingCount Int              @default(0) @map("holding_count")
+  moderatedBy  String?          @map("moderated_by") @db.Uuid
+  moderatedAt  DateTime?        @map("moderated_at") @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  session      Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holds        DedicationHold[]
+  reports      Report[]
+
+  @@index([sessionId, status, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("dedications")
+}
+
+model DedicationHold {
+  dedicationId String     @map("dedication_id") @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  dedication   Dedication @relation(fields: [dedicationId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([dedicationId, userId])
+  @@map("dedication_holds")
+}
+
+model Report {
+  id           String     @id @db.Uuid
+  dedicationId String     @map("dedication_id") @db.Uuid
+  reporterId   String     @map("reporter_id") @db.Uuid
+  reason       String     @db.VarChar(40)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  dedication   Dedication @relation(fields: [dedicationId], references: [id], onDelete: Cascade)
+  reporter     User       @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([dedicationId, reporterId])
+  @@map("reports")
+}
+
+model UserBlock {
+  blockerId String   @map("blocker_id") @db.Uuid
+  blockedId String   @map("blocked_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@map("user_blocks")
+}
+
+// ───────────────────────────── Config & offers ─────────────────────────────
+
+/// Key/value config. Keys: main (app config), group (group meditation), sos, today, legal, catalog.
+model AppConfig {
+  key       String   @id @db.VarChar(40)
+  value     Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("app_config")
+}
+
+model Offer {
+  id        String    @id @db.VarChar(40) // "founding"
+  cap       Int
+  taken     Int       @default(0)
+  open      Boolean   @default(true)
+  productId String    @map("product_id") @db.VarChar(80)
+  openedAt  DateTime  @default(now()) @map("opened_at") @db.Timestamptz(3)
+  closedAt  DateTime? @map("closed_at") @db.Timestamptz(3)
+
+  @@map("offers")
+}
+
+// ───────────────────────────── Revenue ─────────────────────────────
+
+model SubscriptionEvent {
+  id          String   @id @db.VarChar(80) // RevenueCat event id (idempotency)
+  userId      String?  @map("user_id") @db.Uuid
+  type        String   @db.VarChar(40) // INITIAL_PURCHASE, RENEWAL, CANCELLATION, UNCANCELLATION, BILLING_ISSUE, EXPIRATION, PRODUCT_CHANGE, TRANSFER, SUBSCRIPTION_PAUSED, NON_RENEWING_PURCHASE, TEST
+  productId   String?  @map("product_id") @db.VarChar(80)
+  periodType  String?  @map("period_type") @db.VarChar(20)
+  priceUsd    Decimal? @map("price_usd") @db.Decimal(10, 2)
+  currency    String?  @db.Char(3)
+  store       String?  @db.VarChar(20)
+  eventAt     DateTime @map("event_at") @db.Timestamptz(3)
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+  raw         Json
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([eventAt(sort: Desc)])
+  @@index([userId, eventAt(sort: Desc)])
+  @@index([type, eventAt(sort: Desc)])
+  @@map("subscription_events")
+}
+
+// ───────────────────────────── Notifications ─────────────────────────────
+
+model Notification {
+  id          String             @id @db.Uuid
+  title       String             @db.VarChar(50)
+  body        String             @db.VarChar(150)
+  audience    Audience           @default(all)
+  countries   String[]           @default([])
+  deepLink    String?            @map("deep_link") @db.VarChar(200)
+  sendMode    SendMode           @default(now) @map("send_mode")
+  sendAt      DateTime?          @map("send_at") @db.Timestamptz(3)
+  status      NotificationStatus @default(draft)
+  targeted    Int                @default(0)
+  delivered   Int                @default(0)
+  opened      Int                @default(0)
+  failed      Int                @default(0)
+  createdBy   String             @map("created_by") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  version     Int                @default(1)
+
+  @@index([status, sendAt])
+  @@map("notifications")
+}
+
+/// Automatic notifications (copy + on/off editable in CMS). key: daily_nudge | daily_message | group_warning | trial_ending
+model AutoNotification {
+  key       String   @id @db.VarChar(40)
+  enabled   Boolean  @default(true)
+  title     String   @db.VarChar(50)
+  body      String   @db.VarChar(150)
+  delivered Int      @default(0)
+  opened    Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("auto_notifications")
+}
+
+/// One row per user per local date per automatic key → guarantees max one nudge a day (unique).
+model PushLog {
+  userId    String   @map("user_id") @db.Uuid
+  key       String   @db.VarChar(60) // daily_nudge | group_warning:2026-10-05 | notif:<id>
+  localDate DateTime @map("local_date") @db.Date
+  sentAt    DateTime @default(now()) @map("sent_at") @db.Timestamptz(3)
+  openedAt  DateTime? @map("opened_at") @db.Timestamptz(3)
+
+  @@id([userId, key, localDate])
+  @@index([sentAt])
+  @@map("push_log")
+}
+
+model InboxItem {
+  id        String    @id @db.Uuid
+  userId    String?   @map("user_id") @db.Uuid // null = broadcast (joined at read time by audience)
+  type      String    @db.VarChar(30) // group_start | daily_message | announcement | trial_ending | billing
+  title     String    @db.VarChar(80)
+  body      String    @db.VarChar(200)
+  deepLink  String?   @map("deep_link") @db.VarChar(200)
+  audience  Audience  @default(all)
+  readAt    DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([audience, createdAt(sort: Desc)])
+  @@map("inbox_items")
+}
+
+// ───────────────────────────── Admin ─────────────────────────────
+
+model AdminUser {
+  id           String      @id @db.Uuid
+  email        String      @unique @db.Citext
+  name         String      @db.VarChar(80)
+  role         AdminRole
+  status       AdminStatus @default(invited)
+  passwordHash String?     @map("password_hash")
+  totpSecret   String?     @map("totp_secret") // AES-256-GCM encrypted
+  mfaEnabled   Boolean     @default(false) @map("mfa_enabled")
+  recoveryCodes String[]   @default([]) @map("recovery_codes") // sha256 hashes
+  failedLogins Int         @default(0) @map("failed_logins")
+  lockedUntil  DateTime?   @map("locked_until") @db.Timestamptz(3)
+  lastSignInAt DateTime?   @map("last_sign_in_at") @db.Timestamptz(3)
+  invitedBy    String?     @map("invited_by") @db.Uuid
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  sessions     AdminSession[]
+
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id         String    @id @db.Uuid
+  adminId    String    @map("admin_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.Char(64) // refresh (httpOnly cookie)
+  userAgent  String?   @map("user_agent")
+  ip         String?   @db.Inet
+  lastUsedAt DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  admin      AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@map("admin_sessions")
+}
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorRole  String?  @map("actor_role") @db.VarChar(20)
+  action     String   @db.VarChar(60) // session.publish, motd.update, user.delete …
+  targetType String   @map("target_type") @db.VarChar(40)
+  targetId   String?  @map("target_id") @db.VarChar(80)
+  before     Json?
+  after      Json?
+  ip         String?  @db.Inet
+  requestId  String?  @map("request_id") @db.VarChar(40)
+  at         DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([targetType, targetId, at(sort: Desc)])
+  @@index([actorId, at(sort: Desc)])
+  @@index([at(sort: Desc)])
+  @@map("audit_log")
+}
+
+model Job {
+  id        String    @id @db.Uuid
+  type      JobType
+  status    JobStatus @default(queued)
+  progress  Int       @default(0)
+  payload   Json
+  result    Json?
+  error     String?
+  createdBy String?   @map("created_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([type, status])
+  @@map("jobs")
+}
+
+/// Transactional outbox → Redis pub/sub → Socket.IO (guarantees realtime events only after commit).
+model OutboxEvent {
+  id          BigInt    @id @default(autoincrement())
+  topic       String    @db.VarChar(60) // entity.changed, moderation.new, subs.event, catalog.changed …
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+
+  @@index([publishedAt, id])
+  @@map("outbox_events")
+}
+
+// ───────────────────────────── Analytics rollups ─────────────────────────────
+
+/// Written by the rollup job (hourly for today, final at 00:30 UTC). Dashboards & analytics read only these.
+model DailyAggregate {
+  date            DateTime @id @db.Date
+  meditations     Int      @default(0)
+  minutes         Int      @default(0)
+  groupMeditations Int     @default(0) @map("group_meditations")
+  activeUsers     Int      @default(0) @map("active_users")
+  newUsers        Int      @default(0) @map("new_users")
+  newTrials       Int      @default(0) @map("new_trials")
+  newPaid         Int      @default(0) @map("new_paid")
+  cancellations   Int      @default(0)
+  revenueUsd      Decimal  @default(0) @map("revenue_usd") @db.Decimal(12, 2)
+  peakLive        Int      @default(0) @map("peak_live")
+  countries       Json     @default("{}") // {"DE": 640, ...}
+  byTheme         Json     @default("{}") @map("by_theme")
+  funnel          Json     @default("{}") // installs, intro_done, first_meditation, continued_free, trial, account, paid
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("daily_aggregates")
+}
+
+/// Product analytics events from the app (batched, sampled 100 % in beta). Partition by month; retention 13 months.
+model AnalyticsEvent {
+  id         BigInt   @id @default(autoincrement())
+  userId     String?  @map("user_id") @db.Uuid
+  installId  String?  @map("install_id") @db.VarChar(64)
+  name       String   @db.VarChar(40)
+  props      Json     @default("{}")
+  platform   Platform?
+  appVersion String?  @map("app_version") @db.VarChar(20)
+  at         DateTime @db.Timestamptz(3)
+
+  @@index([name, at])
+  @@index([at])
+  @@map("analytics_events")
+}

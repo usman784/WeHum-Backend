@@ -1,0 +1,24 @@
+# Local stack. `docker compose up -d` starts Postgres, Redis, MinIO (S3) and Mailpit (SMTP UI on :8025).
+# Run the API with `npm run dev` on your machine (hot reload).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: wehum, POSTGRES_PASSWORD: wehum, POSTGRES_DB: wehum }
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "log_min_duration_statement=200"]
+    ports: ["5432:5432"]
+    volumes: ["pg:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U wehum"], interval: 5s, retries: 10 }
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports: ["6379:6379"]
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment: { MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: minio12345 }
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio:/data"]
+  mailpit:
+    image: axllent/mailpit
+    ports: ["1025:1025", "8025:8025"]
+volumes: { pg: {}, minio: {} }

@@ -1,0 +1,33 @@
+import Redis from 'ioredis';
+import { env } from '../config/env';
+
+export const REDIS = Symbol('REDIS');
+
+export function createRedis(url = env.REDIS_URL) {
+  return new Redis(url, { maxRetriesPerRequest: 2, enableAutoPipelining: true, lazyConnect: false });
+}
+
+/** All Redis keys in one place (spec §6.2, §7.4). */
+export const K = {
+  rate: (bucket: string, id: string) => `rl:${bucket}:${id}`,
+  entitlement: (userId: string) => `ent:${userId}`,
+  tokenVersion: (userId: string) => `tv:${userId}`,
+  mergeToken: (t: string) => `merge:${t}`,
+  mfaToken: (t: string) => `mfa:${t}`,
+  loginFail: (key: string) => `lf:${key}`,
+  emailCooldown: (email: string, purpose: string) => `ec:${purpose}:${email}`,
+  config: (key: string) => `config:${key}`,
+  presenceMed: (medId: string) => `pz:m:${medId}`,
+  presenceZ: 'pz:z',
+  presenceUser: (userId: string) => `pz:u:${userId}`,
+  aggCountry: 'pz:agg:country',
+  aggSession: 'pz:agg:session',
+  lobby: (date: string) => `lobby:${date}`,
+  practiced: (date: string) => `motd:${date}:users`,
+  medsToday: (date: string) => `med:${date}`,
+  dedLimit: (userId: string, localDate: string) => `ded:${userId}:${localDate}`,
+  today: (date: string, plan: 'free' | 'member') => `today:${date}:${plan}`,
+  catalog: (version: number) => `catalog:v${version}`,
+  vibration: 'vibration:now',
+  leader: 'scheduler:leader',
+} as const;
