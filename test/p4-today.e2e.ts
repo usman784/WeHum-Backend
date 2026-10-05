@@ -219,6 +219,17 @@ describe('P4 GET /v1/today', () => {
     expect((await h().get('/v1/live?date=nope', { token: g.accessToken })).status).toBe(400);
   });
 
+  it('GET /v1/admin/public/live: the CMS sign-in page gets two totals without a token, and nothing else', async () => {
+    await redis.hset(K.aggCountry, { DE: 12, FR: 7, BR: 3 });
+    await redis.set(K.medsToday(dayIso()), '3180');
+    const r = await h().get('/v1/admin/public/live');
+    expect(r.status).toBe(200);
+    expect(r.headers['cache-control']).toBe('public, max-age=10');
+    expect(Object.keys(r.body.data).sort()).toEqual(['at', 'meditatedToday', 'meditatingNow']); // no countries, no vibration
+    expect(r.body.data).toMatchObject({ meditatedToday: 3180, meditatingNow: 22 });
+    await redis.del(K.medsToday(dayIso()));
+  });
+
   it('ETag/304, and it changes when my progress changes', async () => {
     const g = await guest(app);
     const a = await h().get('/v1/today', { token: g.accessToken });

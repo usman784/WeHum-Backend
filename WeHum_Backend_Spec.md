@@ -1235,3 +1235,12 @@ Open issues / risks:
 - `entitlement:changed`, `inbox:new`, `dedication:*`, `moderation:*`, `subs:event`, `users:new`, `notification:stats` are routed and role-gated but produced by P6–P9.
 Evidence: local run above.
 Status: ✅ done
+
+### Addendum to P5 — public totals for the CMS sign-in page (added during CMS phase P2)
+Date: 2026-10-06
+Built: `GET /v1/admin/public/live` (no token). Returns only `meditatedToday`, `meditatingNow` and `at`; no countries, nothing per user; rate limit 30/min per IP; `cache-control: public, max-age=10`. The CMS sign-in page shows "meditated together today" from it. `GET /v1/live` stays app-only.
+Tests run: `npm test` → 221 passed, 0 failed (one new test in `p4-today.e2e.ts`; the role-matrix test now allows exactly this one public admin route).
+Bugs found → fixed: none.
+Decisions / deviations from spec: CMS spec §6.3 calls for a "public `GET /v1/live`"; that route needs an app token, so a separate public route with less data was added instead of opening the app route.
+Open issues / risks: in one full run the P5 test "T0: every client in the lobby gets group:start within a second (100 clients)" failed once while the machine was busy with other test runs; it passed alone and in the next full run. Timing-sensitive under load.
+Status: ✅ done

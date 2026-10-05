@@ -740,6 +740,16 @@ paths:
       responses:
         '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
         default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/public/live:
+    get:
+      operationId: get_v1_admin_public_live
+      tags: ["Admin Auth"]
+      summary: "Totals for the CMS sign-in page"
+      description: "Auth: public. meditatedToday, meditatingNow, at. No countries, nothing per user. Cached 10 s."
+      security: []
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /v1/admin/team:
     get:
       operationId: get_v1_admin_team

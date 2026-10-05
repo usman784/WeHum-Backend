@@ -51,7 +51,8 @@ describe('P3 role matrix (4 roles × every admin route)', () => {
     const unguarded = routes.filter((r) => !r.public && r.roles.length === 0).map((r) => `${r.method} ${r.path}`);
     expect(unguarded).toEqual([]);
     const publicOnes = routes.filter((r) => r.public).map((r) => r.path);
-    expect(publicOnes.every((p) => p.startsWith('/v1/admin/auth/'))).toBe(true); // nothing public except the sign-in family
+    // Nothing public except the sign-in family and the two totals shown on the CMS sign-in page.
+    expect(publicOnes.filter((p) => !p.startsWith('/v1/admin/auth/'))).toEqual(['/v1/admin/public/live']);
   });
 
   it('no token → 401, app (guest) token → 401, for every protected route', async () => {
