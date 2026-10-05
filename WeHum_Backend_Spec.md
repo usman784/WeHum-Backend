@@ -1046,4 +1046,26 @@ Evidence: (CI run, k6 report, Sentry/Grafana links)
 Status: ✅ done / ⚠️ blocked
 ```
 
-_(No phases completed yet.)_
+### Phase P0 — Foundation
+Status: ✅ done (see git history `51be123`). Covered by `test/p0-foundation.e2e.ts` (3 tests).
+
+### Phase P1 — Auth
+Date: 2026-10-05
+Built: guest auth (idempotent per install id); refresh rotation with reuse detection (whole family revoked); Apple and Google sign-in against a JWKS (nonce check); email link/login/verify, magic link, password forgot/reset (signs out all devices); `ACCOUNT_EXISTS` + single-use `mergeToken` → `/v1/auth/merge`; lockout after 5 bad passwords; per-route Redis rate limits with `Retry-After`; 426 version gate; `/v1/me` GET/PATCH; `/v1/time`.
+Tests run:
+- `npm run typecheck` → clean.
+- `npm test` → 3 files, **25 passed, 0 failed** (P1 e2e: 16 · P0 e2e: 3 · unit: 6).
+- `npm run build` → OK.
+- P1 e2e covers: guest idempotency + validation, `/me` auth and validation, refresh rotation + reuse, `TOKEN_EXPIRED`, logout, email link/verify/login/lockout, weak password, ACCOUNT_EXISTS → merge (moves meditations and daily stats, deletes the guest, merge token single use), magic link (single use, no account enumeration), password reset (signs out all devices), Apple and Google with a local JWKS (`SocialVerifier.useKeys`) incl. forged token and Apple link conflict, 426 gate, auth rate limit (10/min/IP).
+Performance: not measured in P1 (budgets are checked in P2+ and P10).
+Bugs found → fixed:
+- `/healthz` and `/readyz` returned `AUTH_REQUIRED` after the global `AuthGuard` was added in P1 (a P0 test caught it). Fixed by marking `HealthController` `@Public()`.
+Decisions / deviations from spec:
+- The P1 e2e tests already existed in the WIP commit (the README said they were missing); this phase ran them and fixed the regression above.
+- Tests run on real Postgres and Redis (docker), not Testcontainers; the `TEST_DATABASE_URL` / `TEST_REDIS_URL` env vars let them run against any instance.
+Open issues / risks:
+- Apple/Google verification is tested with local keys only; real provider JWKS needs a staging check once the client ids exist.
+- `openapi/openapi.yaml` is not yet regenerated from `@nestjs/swagger` (to be done with the P2 contract).
+Evidence: local run above; CI runs on push.
+Status: ✅ done
+

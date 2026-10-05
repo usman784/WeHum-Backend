@@ -5,8 +5,10 @@ import type Redis from 'ioredis';
 import type { Pool } from 'pg';
 import { PG_POOL } from '../../infra/core.module';
 import { REDIS } from '../../infra/redis';
+import { Public } from '../../common/auth';
 import { RAW } from '../../common/envelope.interceptor';
 
+@Public()
 @ApiExcludeController()
 @Controller()
 export class HealthController {
