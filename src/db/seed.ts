@@ -4,7 +4,6 @@
  * Idempotent — safe to run many times. Usage: npm run seed
  */
 import argon2 from 'argon2';
-import { addDays, formatISO } from 'date-fns';
 import { sql } from 'drizzle-orm';
 import { v7 as uuid } from 'uuid';
 import { env } from '../config/env';
@@ -37,7 +36,7 @@ const AUTO = [
 ];
 
 const slug = (t: string) => t.toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-const day = (d: Date) => formatISO(d, { representation: 'date' });
+const day = (d: Date) => d.toISOString().slice(0, 10); // UTC dates (the MOTD / group time are UTC)
 
 export async function seed(url?: string) {
   const pool = createPool(url);
@@ -123,13 +122,13 @@ export async function seed(url?: string) {
 
     const today = new Date();
     for (let d = -3; d <= 10; d++) {
-      const date = day(addDays(today, d));
+      const date = day(new Date(today.getTime() + d * 86_400_000));
       await db.insert(s.motdDays).values({ date, sessionId: sessionIds[(d + 3) % sessionIds.length]!, practicedToday: d < 0 ? 900 + d * 40 : 0 });
       for (const len of [10, 30, 45]) await db.insert(s.motdVariants).values({ date, lengthMin: len, mediaId: await media('audio', `motd ${date} ${len}`, len * 60) });
     }
     for (let d = -6; d <= 0; d++) {
       await db.insert(s.dailyMessages).values({
-        date: day(addDays(today, d)), type: d % 3 === 0 ? 'audio' : 'text', title: ['On patience', 'Small steps', 'Being kind to yourself', 'The quiet in between', 'Starting again', 'You are not alone', 'Rest is practice'][d + 6]!,
+        date: day(new Date(today.getTime() + d * 86_400_000)), type: d % 3 === 0 ? 'audio' : 'text', title: ['On patience', 'Small steps', 'Being kind to yourself', 'The quiet in between', 'Starting again', 'You are not alone', 'Rest is practice'][d + 6]!,
         text: 'A short reflection from Raphael for today.', themeTag: THEMES[(d + 6) % THEMES.length]![1], status: 'live',
       });
     }

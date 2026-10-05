@@ -29,6 +29,8 @@ const schema = z.object({
   SMTP_URL: z.string().default(''),
   APP_LINK_BASE: z.string().default('https://wehum.app'),
   REVENUECAT_WEBHOOK_SECRET: z.string().default(''),
+  CDN_BASE_URL: z.string().default('http://localhost:9000/wehum-media-dev'),
+  CDN_SIGNING_SECRET: z.string().default('dev-only-cdn-secret'),
   SENTRY_DSN: z.string().default(''),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().default(0.1),
   SEED_OWNER_EMAIL: z.string().default('owner@wehum.app'),
@@ -43,5 +45,9 @@ if (!parsed.success) {
   process.exit(1);
 }
 export const env = parsed.data;
+if ((env.NODE_ENV === 'production' || env.NODE_ENV === 'staging') && env.CDN_SIGNING_SECRET === 'dev-only-cdn-secret') {
+  console.error('Invalid environment:\n - CDN_SIGNING_SECRET: must be set in staging/production');
+  process.exit(1);
+}
 export type Env = typeof env;
 export const isProd = env.NODE_ENV === 'production' || env.NODE_ENV === 'staging';

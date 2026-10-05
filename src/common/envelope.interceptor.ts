@@ -7,7 +7,9 @@ export const RAW = Symbol('raw');
 export class EnvelopeInterceptor implements NestInterceptor {
   intercept(ctx: ExecutionContext, next: CallHandler) {
     if (ctx.getType() !== 'http') return next.handle();
+    const res = ctx.switchToHttp().getResponse<{ statusCode: number }>();
     return next.handle().pipe(map((body) => {
+      if (res.statusCode === 304 || res.statusCode === 204) return undefined; // no body allowed (ETag hits, deletes)
       if (body && typeof body === 'object' && (RAW in body || ('data' in body && Object.keys(body).every((k) => k === 'data' || k === 'meta')))) {
         if (RAW in body) { const { [RAW]: _r, ...rest } = body as Record<symbol | string, unknown>; return rest; }
         return body;

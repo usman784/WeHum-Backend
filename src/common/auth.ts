@@ -4,6 +4,7 @@ import type { FastifyRequest } from 'fastify';
 import type Redis from 'ioredis';
 import { env } from '../config/env';
 import { K, REDIS } from '../infra/redis';
+import { EntitlementService } from '../modules/entitlements/entitlement.service';
 import { TokensService, type AdminClaims, type AppClaims } from '../modules/auth/tokens.service';
 import { ConfigService, type MainConfig } from '../modules/config/config.service';
 import { AppError } from './errors';
@@ -12,12 +13,16 @@ export interface AppUser { id: string; isGuest: boolean; premium: boolean; insta
 export interface AdminUser { id: string; role: AdminClaims['role']; name: string }
 export type AuthedRequest = FastifyRequest & { user?: AppUser; admin?: AdminUser };
 
-const PUBLIC = 'wh:public', OPTIONAL = 'wh:optional', SCOPE = 'wh:scope', ROLES = 'wh:roles', RATE = 'wh:rate', NO_VERSION = 'wh:noversion';
+const MEMBER = 'wh:member', ACCOUNT = 'wh:account', PUBLIC = 'wh:public', OPTIONAL = 'wh:optional', SCOPE = 'wh:scope', ROLES = 'wh:roles', RATE = 'wh:rate', NO_VERSION = 'wh:noversion';
 
 /** No token needed. */
 export const Public = () => SetMetadata(PUBLIC, true);
 /** Token read if present (e.g. guest token on login → mergeToken). */
 export const OptionalAuth = () => SetMetadata(OPTIONAL, true);
+/** Premium route: active entitlement required (checked server-side, never from the JWT hint). */
+export const Member = () => SetMetadata(MEMBER, true);
+/** Account route: guests get ACCOUNT_REQUIRED. */
+export const Account = () => SetMetadata(ACCOUNT, true);
 /** CMS routes: admin token + allowed roles. */
 export const AdminRoles = (...roles: AdminClaims['role'][]) => (target: object, key?: string | symbol, desc?: PropertyDescriptor) => {
   SetMetadata(SCOPE, 'admin')(target, key!, desc!);
@@ -67,6 +72,24 @@ export class AuthGuard implements CanActivate {
       if (optional) return true;
       throw e;
     }
+    return true;
+  }
+}
+
+/** Global guard 1b: @Account() / @Member() (runs after AuthGuard has set req.user). */
+@Injectable()
+export class AccessGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector, private readonly entitlements: EntitlementService) {}
+
+  async canActivate(ctx: ExecutionContext) {
+    if (ctx.getType() !== 'http') return true;
+    const meta = (k: string) => this.reflector.getAllAndOverride<boolean>(k, [ctx.getHandler(), ctx.getClass()]);
+    const needAccount = meta(ACCOUNT), needMember = meta(MEMBER);
+    if (!needAccount && !needMember) return true;
+    const u = ctx.switchToHttp().getRequest<AuthedRequest>().user;
+    if (!u) throw new AppError('AUTH_REQUIRED');
+    if (needAccount && u.isGuest) throw new AppError('ACCOUNT_REQUIRED');
+    if (needMember && !(await this.entitlements.isActive(u.id))) throw new AppError('PREMIUM_REQUIRED');
     return true;
   }
 }

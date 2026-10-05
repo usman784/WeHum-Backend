@@ -1069,3 +1069,39 @@ Open issues / risks:
 Evidence: local run above; CI runs on push.
 Status: ✅ done
 
+### Phase P2 — Content & catalog
+Date: 2026-10-05
+Built (app read side; admin CRUD is P3):
+- `GET /v1/catalog` snapshot (themes, teachers, live sessions, programs + days, sound blocks, SoS) with `ETag "c{version}"`, `?version=` and `If-None-Match` → 304 (no body), `Cache-Control: public, max-age=300, stale-while-revalidate=600`. Version = `app_config('catalog').version`; `CatalogService.bump()` is what P3 mutations call.
+- `GET /v1/sessions/{id}`, `/programs/{id}` (+ my progress), `/teachers/{id}`, `/sos` (ETag), `/search` (trigram ILIKE, filters, 60/min bucket).
+- `GET /v1/motd/{date}` (3 lengths, group time, live `practicedToday`), `GET /v1/daily-messages[/{date}]` (member; falls back to the latest earlier message; nothing beyond tomorrow is served; keyset archive).
+- `POST /v1/media/play-url` for session / MOTD variant / sound block / daily message: premium → `403 PREMIUM_REQUIRED`, URL valid 6 h (download 7 d), YouTube items return the id only, `422 MEDIA_NOT_READY`, `422 INVALID_STATE` for non-downloadable.
+- Infra: `CdnSigner` (HMAC-signed, expiring URLs), `CacheService` (cache-aside with stampede lock), `EntitlementService` (Redis 60 s) with `@Member()` / `@Account()` + `AccessGuard`, ETag helper.
+Tests run (all against real Postgres 16 + Redis 7 in docker):
+- `npm run typecheck` clean · `npm run build` OK.
+- `npm test` → 5 files, **55 passed, 0 failed** (P2 e2e 28, P1 e2e 16, P0 e2e 3, unit 8).
+- P2 e2e covers: snapshot shape + headers, no leak of storage keys / media ids / premium YouTube ids, 304 by ETag and by `?version=`, 200 after `bump()`, draft/archived/future sessions hidden, detail 404/400, program progress, teacher, SoS 304, search (filters, wildcard + injection safe), MOTD (clamp to tomorrow, bad date), practicedToday from Redis, daily-message gating / fallback / no future / pagination, play-url (free vs member, signature binds expiry, 6 h vs 7 d, YouTube, MOTD, block, daily message, not-ready, validation, entitlement cache bust + expiry).
+Performance (in-process via `fastify.inject`, 150 requests each, excludes network):
+| Endpoint | p50 | p95 | p99 | Budget |
+|---|---|---|---|---|
+| `/v1/catalog` 200 | 2.8 ms | 4.4 ms | 5.3 ms | p95 < 50 |
+| `/v1/catalog` 304 | 2.2 ms | 2.8 ms | 3.4 ms | p95 < 50 |
+| `/v1/sos` | 2.4 ms | 4.0 ms | 4.7 ms | p95 < 50 |
+| `/v1/motd/{date}` | 2.5 ms | 3.5 ms | 3.9 ms | p95 < 50 |
+| `/v1/sessions/{id}` | 3.0 ms | 4.3 ms | 5.1 ms | p95 < 50 |
+| `/v1/search?q=` | 3.8 ms | 5.1 ms | 7.8 ms | p95 < 120 |
+Bugs found → fixed:
+- A 304 response was sent with a `{"data":null}` body (envelope wrapped the empty result). `EnvelopeInterceptor` now returns no body for 304/204.
+- `db/seed.ts` computed MOTD / daily-message dates in the machine's local time zone; they are UTC now (a seeded "today" could differ from the server's UTC today).
+Decisions / deviations from spec:
+- Signed URLs use an HMAC scheme (`?exp=&sig=`) that a CDN edge function verifies; real CloudFront key-pair signing is swapped in at P10 (infra), the API contract (`url`, `expiresAt`) does not change. `CDN_SIGNING_SECRET` is mandatory in staging/production.
+- The snapshot is cached in Redis as JSON (not gzip) plus once per process; compression happens on the wire (`@fastify/compress`). Detail caches are keyed by catalog version, so a bump invalidates them without tag invalidation.
+- Visibility = `status='live'` and `publish_at <= now`. Scheduled sessions become visible on the next catalog bump; the scheduler job that bumps at `publish_at` comes with P3.
+- `practicedToday` on a session is non-zero only for today's MOTD session until P4 adds per-session counters. `dedications.preview` is an empty list until P7.
+- `X-Install-Id`-based and other P4+ endpoints (`/bootstrap`, `/today`, `/live`, `/group/next`) are not part of P2.
+Open issues / risks:
+- `openapi/openapi.yaml` is still the hand-written outline; generating it from `@nestjs/swagger` needs `@ApiResponse` DTOs on the controllers (planned with the P3 contract pass).
+- The 60 s entitlement cache is busted by `EntitlementService.invalidate()`; the RevenueCat webhook (P6) must call it.
+- Local note: if ports 5432/6379 are used by another stack, run the tests with `TEST_DATABASE_URL` / `TEST_REDIS_URL` pointing at other ports.
+Evidence: local run above.
+Status: ✅ done
