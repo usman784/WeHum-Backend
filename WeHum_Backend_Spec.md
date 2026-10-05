@@ -335,7 +335,7 @@ Base URL: `https://api.wehum.app` (staging `api.staging.wehum.app`). Everything 
   5. The app calls `Purchases.logIn(newUserId)`; RevenueCat transfers per its project setting.
 
 **Identity verification**
-- Apple: verify the id token against Apple JWKS (`aud` = bundle id `com.wehum.app`), plus the nonce.
+- Apple: verify the id token against Apple JWKS (`aud` = bundle id `app.wehum.meditation`), plus the nonce.
 - Google: verify against Google JWKS (`aud` = iOS and Android client ids).
 - Email:
   - Passwords use argon2id (m=19456, t=2, p=1); minimum 8 characters, checked against a small common-password list.
