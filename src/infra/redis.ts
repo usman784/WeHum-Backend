@@ -32,5 +32,8 @@ export const K = {
   today: (date: string, plan: 'free' | 'member') => `today:${date}:${plan}`,
   catalog: (version: number) => `catalog:v${version}`,
   vibration: 'vibration:now',
+  statsDone: (meditationId: string) => `stats:done:${meditationId}`,
+  countersPlays: 'counters:plays',
+  countersCompletions: 'counters:completions',
   leader: 'scheduler:leader',
 } as const;

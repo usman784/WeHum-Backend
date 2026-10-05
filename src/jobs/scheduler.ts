@@ -40,6 +40,7 @@ export class SchedulerService implements OnModuleInit, OnApplicationShutdown {
   /** Idempotent: re-registering the same scheduler id just updates it. */
   async register() {
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('catalog.publishDue', { every: 60_000 }, { name: 'catalog.publishDue', opts: { removeOnComplete: 100, removeOnFail: 500 } });
+    await this.queues.queue(QUEUES.cron).upsertJobScheduler('counters.flush', { every: 60_000 }, { name: 'counters.flush', opts: { removeOnComplete: 100, removeOnFail: 500 } });
   }
 
   async onApplicationShutdown() {

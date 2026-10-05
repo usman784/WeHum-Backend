@@ -3,7 +3,7 @@ import { Queue, type JobsOptions } from 'bullmq';
 import Redis from 'ioredis';
 import { env } from '../config/env';
 
-export const QUEUES = { media: 'media', cron: 'cron' } as const;
+export const QUEUES = { media: 'media', cron: 'cron', stats: 'stats' } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
 /** BullMQ needs its own connections with `maxRetriesPerRequest: null`. */

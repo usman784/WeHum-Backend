@@ -269,6 +269,7 @@ export const programProgress = pgTable('program_progress', {
   startedAt: ts('started_at').notNull().defaultNow(),
   currentDay: integer('current_day').notNull().default(1),
   completedDays: integer('completed_days').array().notNull().default(sql`'{}'::int[]`),
+  lastDayCompletedAt: ts('last_day_completed_at'),
   completedAt: ts('completed_at'),
 }, (t) => [primaryKey({ columns: [t.userId, t.programId] })]);
 

@@ -1,0 +1,1 @@
+ALTER TABLE "program_progress" ADD COLUMN "last_day_completed_at" timestamp (3) with time zone;

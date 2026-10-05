@@ -1145,3 +1145,45 @@ Open issues / risks:
 - MinIO and ffmpeg are provided by docker/npm for tests; the Docker image installs ffmpeg for production.
 Evidence: local run above; CI now also starts MinIO.
 Status: ✅ done
+
+### Phase P4 — Today, meditations, stats
+Date: 2026-10-05
+Built:
+- **`GET /v1/bootstrap`**: me, entitlement, features, today rules, group config, founding counter, catalog + config versions, SoS header, socket URL, server time. Exempt from the version gate, so an old app gets `updateRequired: true` (and `maintenance: true`) instead of an error. ETag is a hash of the payload without the clock → 304 until something changes.
+- **`GET /v1/today?date=`** (date within ±1 day of the server's): MOTD (+ fallback to the most-played live premium meditation when the day is empty), live line (empty-room rule), group, free pick (stable per user and day, `random` or `newest`), program card, progress card, daily message (members, when switched on). Shared part cached 30 s per (date, plan); user part computed per request; ETag/304.
+- **`GET /v1/live`** (socket-down fallback), **`GET /v1/group/next`**: group state `scheduled → lobby → live → ended` from the UTC start (per-date override beats the default), lobby `waiting` from fresh Redis entries only.
+- **Meditations**: `POST /v1/meditations` (idempotent by client id: 201 new / 200 repeat / 409 other user's id; the server decides `counted` and `localDate`; returns `canDedicate`, `dedicationsLeftToday`, `together`), `POST /v1/meditations/batch` (≤ 100, per-item result), `GET /v1/meditations` (keyset history).
+- **Stats** (BullMQ `stats` queue): `stats.meditation` applies `user_daily_stats` + `user_stats` + MOTD solo count exactly once (Redis marker, retry-safe); plays/completions/practicedToday are batched in Redis and flushed by `counters.flush` (every 60 s, scheduler).
+- **`GET /v1/me/progress?period=week|month|year|all`**: minutes, meditations, together, average (minutes per meditation), days meditated, `daysThisWeek[7]`, bars; ISO week in the user's time zone; no streak / grace / rest-day fields anywhere.
+- **User activity without a phase of its own**: programs (`/start`, `/days/{day}/complete`: one day at a time, opens the next local morning at 07:00 or immediately by rule, needs a counted meditation of that day's session) and recipes / Build your own (CRUD, share link `wehum.app/r/{slug}`, open by anyone, ≤ 100 per user). Migration `0002_program_unlock` adds `program_progress.last_day_completed_at`.
+Tests run (real Postgres, Redis, MinIO, ffmpeg):
+- `npm run typecheck` clean · `npm run build` OK · `npm test` → 12 files, **165 passed, 0 failed**. P4 adds 48 (meditations/stats/progress 20, Today/bootstrap/group/programs/recipes 28).
+- **Counting rule**: 179 s no / 180 s yes; ≥ 50 % of a session shorter than 6 min; 120 s of a long session no.
+- **Offline batch idempotency**: duplicates inside one batch, re-sending the whole batch, a bad item among good ones, 100 items, 101 rejected; stats counted once.
+- **Progress week across DST**: Berlin (clocks back 2026-10-25, forward 2026-03-29), New York (2026-11-01), Sydney (2026-10-04), Tokyo, Kolkata; Sunday 23:30 vs Monday 00:30 local fall in different weeks; the stored `local_date` decides.
+- Also: validation (future start, > 4 h, duration longer than the interval, ±5 min skew), local date by tz, stats retry safety, Redis hot counters, session-counter batching, live line numbers from Redis (never invented), group timing, program unlock rules, recipe validation / ownership / share links.
+Performance (in-process via `fastify.inject`, 120–150 requests each, excluding network):
+| Endpoint | p50 | p95 | Budget |
+|---|---|---|---|
+| `POST /v1/meditations` | 7.3 ms | 9.2 ms | p95 < 150 |
+| `GET /v1/me/progress?period=month` | 5.3 ms | 6.4 ms | p95 < 120 |
+| `GET /v1/bootstrap` (200 / 304) | 3.5 / 3.5 ms | 5.1 / 4.4 ms | p95 < 50 |
+| `GET /v1/today` | 4.3 ms | 5.3 ms | p95 < 50 |
+| `GET /v1/live` · `/v1/group/next` | 2.4 · 3.4 ms | 3.9 · 4.5 ms | p95 < 50 |
+Bugs found → fixed:
+- `canDedicate` used the JWT `gst` claim, which is stale for up to 15 minutes after linking an account; it reads the database now.
+- A recipe slug could end in a half word (`sunday-om-t-xxxx`); trailing hyphens are trimmed and diacritics folded.
+- `GroupService.next()` took "today" from the server clock instead of its `now` argument (not testable); fixed.
+Decisions / deviations from spec:
+- Presence itself is P5. P4 only reads the keys P5 will write: `pz:agg:country` (country → unique users meditating), `lobby:{date}` (user → last seen ms), `vibration:now`. Until then live numbers are honestly 0 / quiet.
+- `practicedToday` = unique users with a counted meditation on that local date (`SCARD motd:{date}:users`); `meditatedToday` = all counted meditations that date (`med:{date}`). Both keyed by the user's local date, 3-day TTL.
+- Plays count every recorded meditation with a session; completions only completed ones; stats (minutes, meditations) only counted ones; minutes per meditation are rounded (min 1).
+- `localDate` uses the user's time zone at the time of recording and the meditation's start instant. Recording is never blocked by entitlement (offline syncs after a lapse must not be lost).
+- Programs and recipes were not assigned to a phase in §14; they are here because Today and the app need them. Dedications, blocks, devices, inbox, export/delete, analytics and entitlement sync stay in P6–P9.
+- `average` on the progress screen is minutes per meditation (matches the design: 105 min / 7 = 15). Month bars are 7-day blocks of the month; year and lifetime bars are calendar months up to the current one.
+Open issues / risks:
+- `practicedToday` on a *session* is still only filled for today's MOTD session; per-session counters arrive with presence (P5).
+- Redis loss resets the hot counters (`med:*`, `motd:*:users`) until the hourly rollup (P9) rebuilds them from Postgres.
+- Bootstrap's `socket.url` is derived from `PUBLIC_API_URL`; staging/prod must set it.
+Evidence: local run above.
+Status: ✅ done

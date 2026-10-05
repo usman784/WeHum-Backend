@@ -3,6 +3,7 @@ import { CoreModule } from './infra/core.module';
 import { HealthController } from './modules/health/health.controller';
 import { JobsModule } from './jobs/jobs.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { ActivityModule } from './modules/activity.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ContentModule } from './modules/catalog/content.module';
 
@@ -11,7 +12,7 @@ import { ContentModule } from './modules/catalog/content.module';
 export class AppModule {
   static forRole(role: 'api' | 'worker' | 'scheduler'): DynamicModule {
     if (role === 'api') {
-      return { module: AppModule, imports: [CoreModule, AuthModule, ContentModule, AdminModule, JobsModule], controllers: [HealthController] };
+      return { module: AppModule, imports: [CoreModule, AuthModule, ContentModule, AdminModule, ActivityModule, JobsModule], controllers: [HealthController] };
     }
     return { module: AppModule, imports: [CoreModule, JobsModule] };
   }

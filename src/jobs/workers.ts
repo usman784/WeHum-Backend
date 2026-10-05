@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from 
 import { Worker } from 'bullmq';
 import type Redis from 'ioredis';
 import { env } from '../config/env';
+import { CountersService } from '../modules/meditations/counters.service';
+import { StatsProcessor } from '../modules/meditations/stats.processor';
 import { MediaProcessor } from './media.processor';
 import { PublishDueService } from './publish-due.service';
 import { bullConnection, QUEUES, QueueService } from './queues';
@@ -13,7 +15,7 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
   private workers: Worker[] = [];
   private conns: Redis[] = [];
 
-  constructor(private readonly media: MediaProcessor, private readonly publishDue: PublishDueService) {}
+  constructor(private readonly media: MediaProcessor, private readonly publishDue: PublishDueService, private readonly stats: StatsProcessor, private readonly counters: CountersService) {}
 
   onModuleInit() { if (env.APP_ROLE === 'worker') this.start(); }
 
@@ -22,8 +24,10 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
     const conn = () => { const c = bullConnection(); this.conns.push(c); return c; };
     this.workers = [
       new Worker(QUEUES.media, (job) => this.media.process(job.data.mediaId, job.data.jobId, job.attemptsMade + 1 >= (job.opts.attempts ?? 1)), { connection: conn(), concurrency: 2 }),
+      new Worker(QUEUES.stats, (job) => this.stats.apply(job.data.meditationId), { connection: conn(), concurrency: 8 }),
       new Worker(QUEUES.cron, async (job) => {
         if (job.name === 'catalog.publishDue') return this.publishDue.run();
+        if (job.name === 'counters.flush') return this.counters.flush();
         this.log.warn(`unknown cron job ${job.name}`);
       }, { connection: conn(), concurrency: 1 }),
     ];

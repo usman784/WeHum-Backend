@@ -94,3 +94,18 @@ export function cookiesOf(headers: Record<string, unknown>) {
   for (const c of raw) { const [pair, ...rest] = c.split(';'); const i = pair!.indexOf('='); out[pair!.slice(0, i)] = { value: pair!.slice(i + 1), flags: rest.join(';').toLowerCase() }; }
   return out;
 }
+
+/** Drops the rate-limit counters (tests that fire many requests as one user). */
+export async function clearRates() {
+  const r = new Redis(process.env.REDIS_URL!);
+  const keys = await r.keys('rl:*');
+  if (keys.length) await r.del(...keys);
+  await r.quit();
+}
+
+/** Guest that holds an active (trial) entitlement. */
+export async function member(app: NestFastifyApplication, db: Client) {
+  const g = await guest(app);
+  await db.query(`INSERT INTO entitlements (user_id, active, product_id, period_type, expires_at) VALUES ($1, true, 'wehum_annual', 'trial', now() + interval '7 days')`, [g.me.id]);
+  return g;
+}
