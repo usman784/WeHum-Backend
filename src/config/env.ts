@@ -52,6 +52,21 @@ const schema = z.object({
   SEED_OWNER_EMAIL: z.string().default('owner@wehum.app'),
   SEED_OWNER_PASSWORD: z.string().default('ChangeMe-2026!'),
   RATE_LIMIT_DISABLED: bool.default('false'),
+  // ── P10 hardening
+  /** Bearer token for GET /metrics (Prometheus sends it). In staging/production /metrics is off (404) until it is set. */
+  METRICS_TOKEN: z.string().default(''),
+  /** Worker and scheduler have no HTTP server: they serve /metrics on this port when set (e.g. 9464). */
+  METRICS_PORT: z.coerce.number().default(0),
+  /** Guest-create attestation (App Attest / Play Integrity): off, monitor (check and count, never block) or enforce. */
+  ATTESTATION_MODE: z.enum(['off', 'monitor', 'enforce']).default('off'),
+  /** Apple team id + bundle id = the App Attest app id ("TEAMID.app.wehum.meditation"). */
+  APPLE_TEAM_ID: z.string().default(''),
+  /** Android package name checked in the Play Integrity verdict. */
+  ANDROID_PACKAGE: z.string().default('app.wehum.meditation'),
+  /** Google service account (JSON, base64) allowed to call the Play Integrity API. */
+  PLAY_INTEGRITY_SA_B64: z.string().default(''),
+  /** Apple App Attestation Root CA, PEM in base64 (https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem). */
+  APP_ATTEST_ROOT_CA_B64: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);

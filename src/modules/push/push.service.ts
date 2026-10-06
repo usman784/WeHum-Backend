@@ -8,6 +8,7 @@ import { RealtimeBus } from '../../infra/realtime-bus';
 import { REDIS } from '../../infra/redis';
 import { ConfigService } from '../config/config.service';
 import { GroupService } from '../today/group.service';
+import { metrics } from '../../infra/metrics';
 import { PushTransport } from './push.transport';
 
 export type Audience = 'all' | 'members' | 'free' | 'trial' | 'guests' | 'country' | 'founding';
@@ -54,6 +55,8 @@ export class PushService {
     const ok = new Set<string>();
     let failed = 0;
     for (const d of devs) { if (status.get(d.token!) === 'ok') ok.add(d.userId); else failed++; }
+    metrics.pushSent.inc({ key: msg.type, status: 'delivered' }, ok.size);
+    if (failed) metrics.pushSent.inc({ key: msg.type, status: 'failed' }, failed);
     return { delivered: [...ok], failed };
   }
 

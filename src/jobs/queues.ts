@@ -1,3 +1,4 @@
+import { metrics, onScrape } from '../infra/metrics';
 import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Queue, type JobsOptions } from 'bullmq';
 import Redis from 'ioredis';
@@ -14,6 +15,15 @@ export const bullConnection = () => new Redis(env.REDIS_URL, { maxRetriesPerRequ
 export class QueueService implements OnApplicationShutdown {
   private readonly queues = new Map<QueueName, Queue>();
   private readonly conn = bullConnection();
+
+  constructor() {
+    onScrape(async () => {
+      for (const name of Object.values(QUEUES)) {
+        const c = await this.queue(name).getJobCounts('waiting', 'delayed', 'prioritized');
+        metrics.queueDepth.set({ queue: name }, (c.waiting ?? 0) + (c.delayed ?? 0) + (c.prioritized ?? 0));
+      }
+    });
+  }
 
   queue(name: QueueName) {
     let q = this.queues.get(name);

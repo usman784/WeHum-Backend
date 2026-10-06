@@ -10,6 +10,7 @@ import { AppModule } from './app.module';
 import { AppErrorFilter } from './common/error.filter';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { env, isProd } from './config/env';
+import { metrics } from './infra/metrics';
 import { RedisIoAdapter } from './realtime/redis-io.adapter';
 
 /** Builds the HTTP app (used by main.ts and by e2e tests). */
@@ -43,6 +44,12 @@ export async function createApp(opts: { logger?: boolean } = {}) {
   app.useGlobalInterceptors(new EnvelopeInterceptor());
   app.useGlobalFilters(new AppErrorFilter());
   app.getHttpAdapter().getInstance().addHook('onSend', async (req, reply) => { reply.header('x-request-id', String(req.id)); });
+  // spec §11: http_request_duration_seconds{route,method,status} (the route pattern, never the raw URL)
+  app.getHttpAdapter().getInstance().addHook('onResponse', async (req, reply) => {
+    const route = req.routeOptions?.url ?? 'unmatched';
+    if (route === '/metrics') return;
+    metrics.httpDuration.observe({ route, method: req.method, status: String(reply.statusCode) }, reply.elapsedTime / 1000);
+  });
 
   if (!isProd) {
     const doc = SwaggerModule.createDocument(app, new DocumentBuilder()

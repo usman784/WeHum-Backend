@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type Redis from 'ioredis';
+import { metrics } from './metrics';
 import { REDIS } from './redis';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -11,6 +12,8 @@ export class CacheService {
 
   async getOrSet<T>(key: string, ttlSec: number, loader: () => Promise<T>): Promise<T> {
     const hit = await this.redis.get(key).catch(() => null);
+    const family = key.split(':')[0] ?? key; // "catalog:v12" → "catalog": label values stay few
+    metrics.cacheHit.inc({ key: family, result: hit !== null ? 'hit' : 'miss' });
     if (hit !== null) return JSON.parse(hit) as T;
     const lock = `lock:${key}`;
     const got = await this.redis.set(lock, '1', 'PX', 5000, 'NX').catch(() => 'OK');

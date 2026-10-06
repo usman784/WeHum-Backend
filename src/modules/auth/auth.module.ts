@@ -9,18 +9,19 @@ import { TimeController } from './time.controller';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SocialVerifier } from './social.verifier';
+import { AttestationService } from './attestation';
 import { TokensService } from './tokens.service';
 
 @Module({
   controllers: [AuthController, MeController, TimeController],
   providers: [
-    TokensService, SocialVerifier, AuthService, Mailer, ConfigService, EntitlementService,
+    TokensService, SocialVerifier, AuthService, Mailer, ConfigService, EntitlementService, AttestationService,
     // order matters: who are you → how often → is this app version allowed
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: AppGateGuard },
   ],
-  exports: [TokensService, AuthService, Mailer, ConfigService, EntitlementService],
+  exports: [TokensService, AuthService, Mailer, ConfigService, EntitlementService, AttestationService],
 })
 export class AuthModule {}

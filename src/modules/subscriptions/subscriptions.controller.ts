@@ -10,6 +10,7 @@ import { subscriptionEvents } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { QUEUES, QueueService } from '../../jobs/queues';
 import { toEntitlement } from '../me/me.mapper';
+import { metrics } from '../../infra/metrics';
 import { RcProcessor } from './rc.processor';
 
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -27,13 +28,14 @@ export class RevenueCatWebhookController {
   async hook(@Headers('authorization') auth: string | undefined, @Body(new Zod(Hook)) body: z.infer<typeof Hook>) {
     const secret = env.REVENUECAT_WEBHOOK_SECRET;
     const given = (auth ?? '').replace(/^Bearer\s+/i, '');
-    if (!secret || !same(given, secret)) throw new AppError('AUTH_REQUIRED', 'Bad webhook secret');
+    if (!secret || !same(given, secret)) { metrics.rcWebhook.inc({ type: 'unknown', status: 'unauthorized' }); throw new AppError('AUTH_REQUIRED', 'Bad webhook secret'); }
     const e = body.event as Record<string, unknown> & { id: string; type: string; event_timestamp_ms: number; product_id?: string; period_type?: string; store?: string; price?: number; currency?: string };
     const [row] = await this.db.insert(subscriptionEvents).values({
       id: e.id, type: e.type, productId: e.product_id ?? null, periodType: e.period_type?.toLowerCase() ?? null, priceUsd: e.price != null ? String(e.price) : null,
       currency: e.currency?.slice(0, 3) ?? null, store: e.store ?? null, eventAt: new Date(e.event_timestamp_ms), raw: body as object,
     }).onConflictDoNothing().returning({ id: subscriptionEvents.id });
     if (row) await this.queues.add(QUEUES.cron, 'rc.process', { eventId: e.id }, { jobId: `rc-${e.id}`, attempts: 5, backoff: { type: 'exponential', delay: 2000 } });
+    metrics.rcWebhook.inc({ type: e.type, status: row ? 'queued' : 'duplicate' });
     return { ok: true, duplicate: !row };
   }
 }

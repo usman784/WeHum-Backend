@@ -19,6 +19,7 @@ import { GroupService } from '../modules/today/group.service';
 import { LobbyService } from './lobby.service';
 import { PresenceService } from './presence.service';
 import { connectError, fail, limitEvents, ok, safely, watchExpiry } from './socket-util';
+import { metrics } from '../infra/metrics';
 import { K } from '../infra/redis';
 
 export const MAX_ROOMS = 4;
@@ -82,12 +83,14 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   handleConnection(socket: LiveSocket) {
+    metrics.socketConnections.inc({ ns: 'live' });
     void socket.join([`user:${socket.data.user.id}`, 'config']);
     limitEvents(socket);
     socket.data.clear = watchExpiry(socket, socket.data.exp);
   }
 
   async handleDisconnect(socket: LiveSocket) {
+    metrics.socketConnections.dec({ ns: 'live' });
     socket.data?.clear?.();
     // presence is kept for 90 s (a backgrounded app may come back); the lobby is left at once
     for (const d of socket.data?.lobbies ?? []) await this.lobby.leave(d, socket.data.user.id).catch(() => null);

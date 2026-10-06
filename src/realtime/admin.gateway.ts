@@ -14,6 +14,7 @@ import { TokensService, type AdminClaims } from '../modules/auth/tokens.service'
 import { LiveService } from '../modules/live/live.service';
 import { utcToday } from '../modules/motd/motd.service';
 import { connectError, fail, limitEvents, ok, safely, watchExpiry } from './socket-util';
+import { metrics } from '../infra/metrics';
 import type { EntityType } from './socket-events';
 
 const ENTITY_TYPES: EntityType[] = ['session', 'media', 'theme', 'teacher', 'program', 'motd', 'dailyMessage', 'soundBlock', 'sos', 'config', 'notification', 'challenge', 'admin', 'user'];
@@ -56,6 +57,7 @@ export class AdminGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   handleConnection(socket: AdminSocket) {
+    metrics.socketConnections.inc({ ns: 'admin' });
     const { id, role } = socket.data.admin;
     void socket.join([`admin:${id}`, `role:${role}`, 'config', 'entities']);
     limitEvents(socket);
@@ -63,6 +65,7 @@ export class AdminGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   async handleDisconnect(socket: AdminSocket) {
+    metrics.socketConnections.dec({ ns: 'admin' });
     socket.data?.clear?.();
     for (const key of [...(socket.data?.editing ?? [])]) { const [type, id] = key.split('|') as [string, string]; await this.stopEditing(socket, type, id).catch(() => null); }
   }

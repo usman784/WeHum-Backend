@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { CurrentUser, OptionalAuth, Public, RateLimit, SkipVersionGate, type AppUser, type AuthedRequest } from '../../common/auth';
 import { AppError } from '../../common/errors';
 import { Zod } from '../../common/zod';
+import { AttestationDto, AttestationService } from './attestation';
 import { AuthService, type DeviceInfo } from './auth.service';
 
 const tz = z.string().min(1).max(64).refine((v) => { try { new Intl.DateTimeFormat('en', { timeZone: v }); return true; } catch { return false; } }, 'Unknown time zone');
@@ -15,7 +16,8 @@ const GuestDto = z.object({
   locale: z.string().max(10).default('en'),
   osVersion: z.string().max(40).optional(),
   model: z.string().max(80).optional(),
-  attestation: z.string().max(4096).optional(),
+  /** App Attest / Play Integrity proof (P10); an object, or the same as a JSON string. */
+  attestation: z.union([z.string().max(16_000), AttestationDto]).optional(),
 });
 const RefreshDto = z.object({ refreshToken: z.string().min(20) });
 const LogoutDto = z.object({ refreshToken: z.string().min(20).optional() });
@@ -45,11 +47,16 @@ const deviceFrom = (req: AuthedRequest): DeviceInfo | null => {
 @SkipVersionGate()
 @Controller('v1/auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService, private readonly attestation: AttestationService) {}
+
+  /** One-time challenge for App Attest / Play Integrity, used in the next `POST /v1/auth/guest`. */
+  @Public() @RateLimit('attest', 10, 60) @HttpCode(200) @Post('attest/challenge')
+  challenge() { return this.attestation.challenge(); }
 
   @Public() @RateLimit('auth', 10, 60) @Post('guest')
   @ApiOperation({ summary: 'Create or resume a guest user for this install' })
   async guest(@Body(new Zod(GuestDto)) b: z.infer<typeof GuestDto>, @Req() req: AuthedRequest) {
+    await this.attestation.check(b, b.attestation);
     const { created: _created, ...session } = await this.auth.guest(b, country(req));
     return session;
   }

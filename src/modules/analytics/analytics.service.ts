@@ -184,8 +184,10 @@ export class AnalyticsService {
     const tokens = await this.db.execute(sql`DELETE FROM refresh_tokens WHERE expires_at < ${new Date(now - 7 * DAY)}`);
     const guests = await this.db.execute(sql`DELETE FROM users u WHERE u.is_guest AND u.last_active_at < ${new Date(now - months * 30 * DAY)}
       AND NOT EXISTS (SELECT 1 FROM entitlements e WHERE e.user_id = u.id AND e.active)`);
-    this.log.log(`lifecycle: ${events.rowCount} events, ${tokens.rowCount} tokens, ${guests.rowCount} guests`);
-    return { events: events.rowCount ?? 0, tokens: tokens.rowCount ?? 0, guests: guests.rowCount ?? 0 };
+    // P10: published realtime events are only needed for a few days (debugging); unpublished ones are never removed
+    const outbox = await this.db.execute(sql`DELETE FROM outbox_events WHERE published_at IS NOT NULL AND published_at < ${new Date(now - 7 * DAY)}`);
+    this.log.log(`lifecycle: ${events.rowCount} events, ${tokens.rowCount} tokens, ${guests.rowCount} guests, ${outbox.rowCount} outbox rows`);
+    return { events: events.rowCount ?? 0, tokens: tokens.rowCount ?? 0, guests: guests.rowCount ?? 0, outbox: outbox.rowCount ?? 0 };
   }
 
   assertPeriod(p: number) { if (![7, 14, 30, 90].includes(p)) throw new AppError('VALIDATION_FAILED', 'Period must be 7, 14, 30 or 90'); }

@@ -1,0 +1,113 @@
+# WeHum alert rules (backend spec §11). Load into Prometheus / Grafana Mimir; route severity=page to PagerDuty,
+# severity=warn to Slack #wehum-alerts. Every alert names its runbook (ops/runbooks/).
+# DB CPU and Redis memory come from the cloud exporters (CloudWatch: rds_cpuutilization, elasticache memory).
+groups:
+  - name: wehum-api
+    rules:
+      - alert: ApiLatencyOverBudget
+        # spec §6.3: launch requests p95 < 80 ms, everything else < 200 ms
+        expr: histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{route=~"/v1/(bootstrap|today|catalog)"}[5m]))) > 0.08
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "p95 of {{ $labels.route }} is {{ $value | humanizeDuration }} (budget 80 ms)", runbook: ops/runbooks/latency.md }
+      - alert: ApiLatencyOverBudgetGeneral
+        expr: histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{route!~"/v1/(bootstrap|today|catalog)|/metrics|/healthz|/readyz"}[5m]))) > 0.2
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "p95 of {{ $labels.route }} is {{ $value | humanizeDuration }} (budget 200 ms)", runbook: ops/runbooks/latency.md }
+      - alert: Api5xxRate
+        expr: sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m])) / sum(rate(http_request_duration_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "{{ $value | humanizePercentage }} of requests fail with 5xx", runbook: ops/runbooks/errors.md }
+      - alert: ApiDown
+        expr: up{job="wehum-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "API instance {{ $labels.instance }} is not scraped", runbook: ops/runbooks/errors.md }
+
+  - name: wehum-realtime
+    rules:
+      - alert: PresenceLag
+        # a tick that takes long, or no tick at all (no leader)
+        expr: max(presence_tick_lag_ms) > 15000 or (time() - max(presence_tick_timestamp_seconds)) > 15
+        for: 1m
+        labels: { severity: page }
+        annotations: { summary: "Presence numbers are {{ $value }} behind", runbook: ops/runbooks/scheduler.md }
+      - alert: SchedulerLeaderMissing
+        expr: absent(presence_tick_timestamp_seconds{role="scheduler"}) or (time() - max(presence_tick_timestamp_seconds{role="scheduler"})) > 30
+        for: 30s
+        labels: { severity: page }
+        annotations: { summary: "No scheduler leader has ticked for 30 s", runbook: ops/runbooks/scheduler.md }
+      - alert: OutboxLag
+        expr: max(outbox_lag_ms) > 5000
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "Realtime events are {{ $value }} ms behind (outbox)", runbook: ops/runbooks/outbox.md }
+      - alert: GroupStartNotEmitted
+        # the group start is daily at the configured UTC time; give it 2 minutes past T0
+        expr: (time() - max(group_start_emitted_timestamp_seconds)) > 86400 + 120
+        labels: { severity: page }
+        annotations: { summary: "No group:start in over 24 h", runbook: ops/runbooks/scheduler.md }
+      - alert: SocketsDropped
+        expr: sum(socket_connections{ns="live"}) < 0.5 * sum(socket_connections{ns="live"} offset 10m) and sum(socket_connections{ns="live"} offset 10m) > 200
+        for: 2m
+        labels: { severity: warn }
+        annotations: { summary: "App sockets halved in 10 minutes", runbook: ops/runbooks/errors.md }
+
+  - name: wehum-jobs
+    rules:
+      - alert: QueueBacklog
+        expr: max by (queue) (bullmq_queue_depth) > 5000
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "{{ $labels.queue }} has {{ $value }} jobs waiting", runbook: ops/runbooks/queues.md }
+      - alert: JobsFailing
+        expr: sum by (queue) (rate(bullmq_job_duration_count{status="failed"}[10m])) > 0.1
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "{{ $labels.queue }} jobs keep failing", runbook: ops/runbooks/queues.md }
+
+  - name: wehum-integrations
+    rules:
+      - alert: RevenueCatWebhooksRejected
+        expr: sum(rate(rc_webhook_total{status="unauthorized"}[10m])) > 0
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "RevenueCat webhooks are rejected (secret mismatch?)", runbook: ops/runbooks/revenuecat.md }
+      - alert: RevenueCatWebhooksSilent
+        expr: sum(increase(rc_webhook_total{status="queued"}[6h])) == 0
+        labels: { severity: warn }
+        annotations: { summary: "No RevenueCat webhook in 6 h", runbook: ops/runbooks/revenuecat.md }
+      - alert: PushFailing
+        expr: sum(rate(push_sent_total{status="failed"}[15m])) / clamp_min(sum(rate(push_sent_total[15m])), 1e-9) > 0.2
+        for: 15m
+        labels: { severity: warn }
+        annotations: { summary: "{{ $value | humanizePercentage }} of pushes fail", runbook: ops/runbooks/push.md }
+      - alert: AttestationRejecting
+        expr: sum(rate(attestation_total{result="rejected"}[15m])) / clamp_min(sum(rate(attestation_total[15m])), 1e-9) > 0.05
+        for: 15m
+        labels: { severity: warn }
+        annotations: { summary: "{{ $value | humanizePercentage }} of new installs are refused by attestation", runbook: ops/runbooks/attestation.md }
+
+  - name: wehum-data
+    rules:
+      - alert: DbPoolExhausted
+        expr: max(db_pool_in_use) >= 9
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "Postgres pool nearly full on {{ $labels.instance }}", runbook: ops/runbooks/database.md }
+      - alert: DbCpuHigh
+        expr: max(aws_rds_cpuutilization_average{dbinstance_identifier=~"wehum-.*"}) > 80
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "DB CPU {{ $value }}%", runbook: ops/runbooks/database.md }
+      - alert: RedisMemoryHigh
+        expr: max(aws_elasticache_database_memory_usage_percentage_average{cache_cluster_id=~"wehum-.*"}) > 80
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "Redis memory {{ $value }}% (noeviction: writes fail at 100 %)", runbook: ops/runbooks/database.md }
+      - alert: BackupMissing
+        expr: (time() - max(wehum_backup_last_success_timestamp_seconds)) > 30 * 3600
+        labels: { severity: page }
+        annotations: { summary: "No successful database backup for 30 h", runbook: ops/runbooks/restore.md }

@@ -12,6 +12,7 @@ import { PushService } from '../modules/push/push.service';
 import { RcProcessor } from '../modules/subscriptions/rc.processor';
 import { MediaProcessor } from './media.processor';
 import { PublishDueService } from './publish-due.service';
+import { metrics } from '../infra/metrics';
 import { bullConnection, QUEUES, QueueService } from './queues';
 
 /** Consumer side (APP_ROLE=worker): media pipeline and the minute cron handlers. Tests call `start()` themselves. */
@@ -47,7 +48,15 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
         this.log.warn(`unknown cron job ${job.name}`);
       }, { connection: conn(), concurrency: 1 }),
     ];
-    for (const w of this.workers) w.on('failed', (job, err) => this.log.warn(`${w.name}:${job?.name} failed: ${err.message}`));
+    for (const w of this.workers) {
+      w.on('failed', (job, err) => {
+        this.log.warn(`${w.name}:${job?.name} failed: ${err.message}`);
+        if (job?.processedOn) metrics.jobDuration.observe({ queue: w.name, status: 'failed' }, ((job.finishedOn ?? Date.now()) - job.processedOn) / 1000);
+      });
+      w.on('completed', (job) => {
+        if (job.processedOn) metrics.jobDuration.observe({ queue: w.name, status: 'done' }, ((job.finishedOn ?? Date.now()) - job.processedOn) / 1000);
+      });
+    }
   }
 
   /** Waits until the queue is drained (used by tests). */
