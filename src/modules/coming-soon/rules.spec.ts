@@ -13,7 +13,8 @@ describe('milestones', () => {
     expect(by.minutes1000!).toMatchObject({ reached: false, value: 820 });
     expect(by.group10!.reached).toBe(true);
     expect(by.meditations50!).toMatchObject({ reached: true, value: 50 });
-    expect(list.filter((m) => m.reached)).toHaveLength(7);
+    expect(by.group50!).toMatchObject({ reached: false, value: 48 });
+    expect(list.filter((m) => m.reached)).toHaveLength(6); // first, days7, minutes100, group10, minutes500, meditations50
   });
 });
 

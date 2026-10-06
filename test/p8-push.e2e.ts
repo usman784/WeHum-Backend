@@ -296,8 +296,11 @@ describe('P8 announcements', () => {
   });
 
   it('scheduled: waits for its time, then sends; can be cancelled before; at each person\'s reminder time when asked', async () => {
-    const early = await phone({ country: 'NC', reminder: '07:30' }), later = await phone({ country: 'NC', reminder: '18:00' });
     const at = new Date(Date.now() + 2 * HOUR);
+    // a time zone where the send moment is daytime: inside quiet hours (22–07) it would rightly wait (the test ran at night)
+    const hourAt = (tz: string) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(at));
+    const tz = ['UTC', 'Asia/Tokyo', 'America/New_York', 'Asia/Kolkata', 'Pacific/Honolulu', 'Europe/Berlin'].find((z) => hourAt(z) >= 9 && hourAt(z) < 20)!;
+    const early = await phone({ country: 'NC', reminder: '07:30', tz }), later = await phone({ country: 'NC', reminder: '18:00', tz });
     const sch = await draft({ countries: ['NC'], sendMode: 'scheduled', sendAt: at.toISOString() });
     const s = await A(owner).post(`/v1/admin/notifications/${sch.id}/send`);
     expect(s.body.data.status).toBe('scheduled');

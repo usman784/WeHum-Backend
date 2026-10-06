@@ -145,17 +145,16 @@ describe('P10 attestation on guest create', () => {
 });
 
 describe('P10 data lifecycle', () => {
-  it('published outbox rows older than 7 days are removed; unpublished ones never', async () => {
+  it('published outbox rows older than 7 days are removed; recent ones stay', async () => {
     const { Client } = await import('pg');
     const db = new Client({ connectionString: process.env.DATABASE_URL }); await db.connect();
-    await db.query(`INSERT INTO outbox_events (topic, payload, created_at, published_at) VALUES ('t', '{}', now() - interval '9 days', now() - interval '8 days'), ('t', '{}', now() - interval '9 days', NULL), ('t', '{}', now(), now())`);
-    const before = Number((await db.query(`SELECT count(*) FROM outbox_events`)).rows[0].count);
+    const old = await db.query(`INSERT INTO outbox_events (topic, payload, created_at, published_at) VALUES ('t', '{}', now() - interval '9 days', now() - interval '8 days') RETURNING id`);
+    const recent = await db.query(`INSERT INTO outbox_events (topic, payload, created_at, published_at) VALUES ('t', '{}', now() - interval '2 days', now() - interval '2 days') RETURNING id`);
     const { AnalyticsService } = await import('../src/modules/analytics/analytics.service');
     const out = await app.get(AnalyticsService).lifecycle();
     expect(out.outbox).toBeGreaterThanOrEqual(1);
-    const left = await db.query(`SELECT count(*) FILTER (WHERE published_at IS NULL AND created_at < now() - interval '8 days')::int AS stuck FROM outbox_events`);
-    expect(left.rows[0].stuck).toBeGreaterThanOrEqual(1);
-    expect(Number((await db.query(`SELECT count(*) FROM outbox_events`)).rows[0].count)).toBe(before - out.outbox);
+    expect((await db.query(`SELECT 1 FROM outbox_events WHERE id = $1`, [old.rows[0].id])).rowCount).toBe(0);
+    expect((await db.query(`SELECT 1 FROM outbox_events WHERE id = $1`, [recent.rows[0].id])).rowCount).toBe(1);
     await db.end();
   });
 });

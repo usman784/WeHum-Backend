@@ -1338,3 +1338,49 @@ Decisions / deviations:
 - Raw SQL rows give timestamps as text; `membershipOf` converts them (found by a test).
 
 Status: ✅ done
+
+### Phase P10 — Hardening
+Date: 2026-10-07
+
+Built:
+- **Metrics** (`src/infra/metrics.ts`, prom-client): every metric of §11 — `http_request_duration_seconds{route,method,status}` (route pattern, never the raw URL), `socket_connections{ns}`, `presence_live_total`, `presence_tick_lag_ms` (+ tick timestamp for the leader check), `bullmq_queue_depth{queue}`, `bullmq_job_duration{queue,status}`, `outbox_lag_ms`, `rc_webhook_total{type,status}`, `push_sent_total{key,status}`, `cache_lookups_total{key,result}` (hit ratio), `db_pool_in_use`, `attestation_total`, last `group:start` time. API: `GET /metrics` (Bearer `METRICS_TOKEN`; off with 404 in staging/production until the token is set). Worker/scheduler: `METRICS_PORT`.
+- **Alerts** `ops/alerts/prometheus-rules.yml` (19 rules, each with a runbook): latency budgets, 5xx > 1 %, API down, presence lag, scheduler leader missing > 30 s, outbox lag > 5 s, group start not emitted, sockets dropped, queue depth > 5k, failing jobs, RevenueCat rejected/silent, push failing, attestation refusing, DB pool/CPU, Redis memory, backup missing.
+- **Load tests** (§6.3): `load/k6/launch-storm.js` (3,000 rps, p95 < 80 ms thresholds), `load/k6/completion-burst.js` (20k meditations in 60 s), `load/k6/webhook-burst.js` (100/s with duplicates, idempotency check), `scripts/load-group-start.ts` (N sockets in the lobby, `group:start` fan-out < 1 s), next to the P5 `scripts/load-presence.ts`.
+- **Attestation on guest create** (`src/modules/auth/attestation.ts`): `POST /v1/auth/attest/challenge` (one-time, 5 min); `attestation` on `POST /v1/auth/guest` = `{challenge, keyId, object}` (iOS App Attest: CBOR, certificate chain to Apple's root, nonce, key id, app id, counter, AAGUID) or `{challenge, token}` (Android Play Integrity, decoded by Google, package/challenge/recognition/device checks). `ATTESTATION_MODE` off | monitor | enforce; only new installs are checked; `403 ATTESTATION_FAILED` in enforce.
+- **Backups**: `scripts/backup.sh` (pg_dump custom → S3 SSE, Pushgateway success metric), `scripts/restore-drill.sh` (restore newest dump into a throw-away DB, checks, RTO/RPO, drop). **Slow queries**: `npm run db:slow` (pg_stat_statements top statements; `log_min_duration_statement=200` in compose).
+- **Runbooks** `ops/runbooks/*` (one per alert + deploy/rollback + restore log), **WAF** rules `ops/waf.md`.
+- Caching review: catalog/SoS/MOTD/session reads use the stampede-locked cache; config is a read-through cache invalidated on write; cache hits are now measured. Found: published `outbox_events` were never removed → the nightly lifecycle job now deletes published rows older than 7 days.
+
+Tests run: `npm test` → **323 passed** (22 files). New: `p10-hardening.e2e.ts` (10): metrics content and route patterns, metrics token, attestation off / enforce (new vs resumed install) / monitor (counted, not blocked), Android verdict with a faked Google API and single-use challenge, **iOS with a real App Attest object built with openssl** (root → intermediate → credential certificate with the nonce extension; wrong challenge and wrong app id refused), CBOR, verdict checks, outbox cleanup. `tokens.service.spec.ts` (1).
+
+Bugs found → fixed:
+- **Signing keys were loaded twice when two first calls came at once** (no keys configured: local dev and the CMS e2e backend): each made its own key pair, so tokens signed with the losing pair never verified until a restart. `keys()` is now single-flight (test fails 3/3 without the fix).
+- Published outbox rows grew forever (see above).
+- Test `p8-push` "scheduled" depended on the wall clock: run at night, the send moment fell in the phones' quiet hours and was rightly held back. The phones now get a time zone where it is daytime.
+
+Decisions / deviations:
+- Load tests are scripts, not CI jobs: they need a staging-sized environment with `RATE_LIMIT_DISABLED=true` (all virtual users come from one IP). **Budgets are not yet measured** — they run against staging once it has production-like data (open item).
+- WAF and backup schedules are infrastructure configuration documented in `ops/`; the restore drill is ready but **not yet performed** (no staging data yet); its log table is in `ops/runbooks/restore.md`.
+- `METRICS_TOKEN` missing in staging/production turns `/metrics` off instead of failing the boot, so existing deploys keep starting.
+- Apple's root certificate is configuration (`APP_ATTEST_ROOT_CA_B64`, `npm run attest:root` downloads it), not code.
+
+Status: ✅ done (code, scripts, tests); ⚠️ open: k6/50k-socket runs on staging, first restore drill, alert wiring in Grafana.
+
+### Phase P11 — Coming soon
+Date: 2026-10-07
+
+Built (all app routes answer `404 FEATURE_OFF` while the matching flag in `main.features` is off):
+- **Challenges** (app 69): `GET /v1/challenges` (in progress, available, finished, people in it), `POST|DELETE /v1/challenges/:id/join` (members-only challenges need a membership). Progress is counted in the stats job: **the number of different local days since joining with a meditation that counts** (any / group / sleep theme or tag, minimum minutes). Progress, not streaks (client rule of Oct 5): missed days never reset; a late offline meditation fills its day; the last day finishes the challenge.
+- **Gratitude feed** (app 70): three feeds (gratitude, affirmations, sending love); `GET /v1/gratitude?kind`, `POST /v1/gratitude` (member with an account; same rules as dedications: 200 characters, daily limit, no links, profanity/crisis flags with the help card, muted writers hidden), `POST /v1/gratitude/:id/report` (+ block; auto-hide at the report threshold). Live rooms `gratitude:{kind}` (`gratitude:new`, `gratitude:removed`). Admin: `GET /v1/admin/gratitude` (review/flagged/hidden/all, crisis first), `POST …/:id/hide|keep`, `…/bulk` (audited).
+- **Breathwork** (app 71–72): templates `breath_patterns` (admin CRUD with If-Match; 6 seeded from the design), lessons = ordered published sessions in config `breathwork` (`GET|PUT /v1/admin/breathwork`, editors), `GET /v1/breathwork`, own patterns `GET|POST|DELETE /v1/me/breath-patterns` (≤ 20, beat rules).
+- **Milestones** (app 73): 12 awards from the person's own stats with the date first reached (`user_milestones`), "the world so far" totals (cached 10 min); `GET /v1/me/milestones`, `GET /v1/admin/milestones` (reached counts).
+- Export includes gratitude posts, patterns, challenges, milestones; deletion cascades and removes visible posts from open feeds.
+
+Tests run: `npm test` → 323 passed. New: `p11-coming-soon.e2e.ts` (14): flags off/on for every route, bootstrap flags, challenge progress through the real stats job (same day once, gap does not reset, late offline day, finish, restart), group-only challenge, members-only, gratitude share/live/limit/links/crisis/reports/keep/hide/bulk/audit/block, breathwork templates and lessons with roles and 409, own patterns, milestones (stored date, world totals, admin counts), export + delete; `rules.spec.ts` (2).
+
+Decisions / deviations:
+- The design's "30 countries meditated with" award needs who-meditated-with-whom data that is not stored; it is replaced by "10 dedications" (12 awards total).
+- Breathwork lessons are existing published meditations picked in the CMS, not a new content type.
+- Gratitude kinds follow the app design's tabs (Gratitude, Affirmations, Sending love); the fourth tab cut off in the design is not known.
+
+Status: ✅ done

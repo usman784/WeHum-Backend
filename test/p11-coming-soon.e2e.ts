@@ -2,7 +2,9 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Client } from 'pg';
 import { v7 as uuid } from 'uuid';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type Redis from 'ioredis';
 import { RealtimeBus } from '../src/infra/realtime-bus';
+import { REDIS } from '../src/infra/redis';
 import { TokensService } from '../src/modules/auth/tokens.service';
 import { ConfigService } from '../src/modules/config/config.service';
 import { StatsProcessor } from '../src/modules/meditations/stats.processor';
@@ -249,6 +251,7 @@ describe('P11 breathwork', () => {
 describe('P11 milestones', () => {
   it('awards follow the person’s own stats and keep the day they were first reached; the world totals are there', async () => {
     const u = await person('Milo');
+    await app.get<Redis>(REDIS).del('world:sofar'); // the world totals are cached 10 min; earlier tests read them empty
     let m = (await as(u.token).get('/v1/me/milestones')).body.data;
     expect(m).toMatchObject({ reached: 0, total: 12 });
     for (let d = -6; d <= 0; d++) await meditateOn(u.id, day(d), { minutes: 15, kind: d % 2 ? 'group' : 'solo' });
