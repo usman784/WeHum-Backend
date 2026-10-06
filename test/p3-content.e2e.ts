@@ -467,6 +467,23 @@ describe('P3 daily messages', () => {
     expect((await A.del(`/v1/admin/daily-messages/${d}`, editor)).status).toBe(404);
     expect((await audit('dailyMessage.delete', d))[0]!.before).toMatchObject({ title: 'On stillness' });
   });
+
+  it('scheduled messages go live on their day (publishDue), future ones wait, empty ones are left alone', async () => {
+    const svc = app.get(PublishDueService);
+    const past = dayIso(-40), future = dayIso(30), empty = dayIso(-41);
+    for (const d of [past, future]) {
+      expect((await A.put(`/v1/admin/daily-messages/${d}`, { type: 'text', title: `Sched ${d}`, text: 'Hello.', status: 'scheduled' })).status).toBe(200);
+    }
+    expect((await A.put(`/v1/admin/daily-messages/${empty}`, { type: 'text', title: 'Empty', status: 'scheduled' })).status).toBe(200); // a draft-like schedule is allowed; going live needs text
+    const status = async (d: string) => (await q<{ status: string }>(`SELECT status FROM daily_messages WHERE date=$1`, [d]))[0]!.status;
+    expect(await svc.publishMessages()).toBe(1);
+    expect(await status(past)).toBe('live');
+    expect(await status(future)).toBe('scheduled');
+    expect(await status(empty)).toBe('scheduled');
+    expect((await audit('dailyMessage.publish', past))[0]).toMatchObject({ actor_role: 'system' });
+    expect(await svc.publishMessages()).toBe(0); // idempotent
+    await q(`DELETE FROM daily_messages WHERE date = ANY($1)`, [[past, future, empty]]);
+  });
 });
 
 describe('P3 Today screen: MOTD + group + config', () => {
