@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import type Redis from 'ioredis';
 import { env } from '../config/env';
+import { NEEDS_REVIEW } from '../modules/community/community.service';
 import { dedications, entitlements, motdDays, offers } from '../db/schema';
 import { DRIZZLE, type DB } from '../infra/core.module';
 import { RealtimeBus } from '../infra/realtime-bus';
@@ -105,7 +106,7 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
       this.live.snapshot(date), this.redis.get(K.medsToday(date)), this.redis.get(K.minsToday(date)),
       this.subscriptionCounts(),
       this.db.select().from(offers).where(eq(offers.id, 'founding')).then((r) => r[0]),
-      this.db.select({ n: sql<number>`count(*)::int` }).from(dedications).where(eq(dedications.status, 'flagged')).then((r) => r[0]?.n ?? 0),
+      this.db.select({ n: sql<number>`count(*)::int` }).from(dedications).where(NEEDS_REVIEW).then((r) => r[0]?.n ?? 0),
     ]);
     return {
       liveNow: snap.total ?? 0, meditationsToday: Number(meds) || 0, minutesToday: Number(mins) || 0,

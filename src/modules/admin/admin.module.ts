@@ -32,6 +32,6 @@ import { TeamService } from './team.service';
     AdminAuthService, AdminWriter, TeamService, ConfigAdminService, SessionsAdminService, ThemesService, TeachersService, ProgramsService,
     ChallengesService, DailyMessagesAdminService, MotdAdminService, SoundBlocksService, SosAdminService, YoutubeService, MediaAdminService,
   ],
-  exports: [AdminWriter, AdminAuthService],
+  exports: [AdminWriter, AdminAuthService, ConfigAdminService],
 })
 export class AdminModule {}

@@ -1278,3 +1278,20 @@ Decisions / deviations:
 - REST paths (`/v1/subscribers/{id}`, promotional grant, `v2/.../offerings/{key}` with `is_current`) follow RevenueCat's documentation but were only run against a fake; check them once against the RevenueCat sandbox before production. The dashboard ticker still shows its own MRR estimate from a price table; switching it to the summary's number is part of the dashboard work (P9).
 
 Status: ✅ done
+
+### Phase P7 — Community
+Date: 2026-10-06
+
+Built:
+- App: `POST /v1/dedications` (member + account; own, counted, finished meditation of the last 24 h, one per meditation; 3 per day with the counter given back when refused; links and handles → `DEDICATION_LINKS`; profanity or crisis words → accepted but `flagged` and not shown; muted writer → accepted but `hidden`; crisis answers `showHelp: true`), `GET /v1/sessions/:id/dedications` (keyset, blocked people filtered, first name + country only, `holding` flag), `PUT/DELETE /v1/dedications/:id/hold` (idempotent, counted once per person), `POST /v1/dedications/:id/report` (unique per person, optional block; the Nth report hides the post and queues it). Session detail now carries the newest three as `dedications.preview`.
+- Admin: `GET /v1/admin/moderation` (filters review / flagged / hidden / all, session, keyset; crisis posts first; reasons given by reporters), `GET …/stats`, `POST …/:id/hide|keep`, `POST …/bulk` (result per item), `POST /v1/admin/users/:id/mute`, `GET/PUT …/moderation/rules` (GET for moderators, PUT owner/admin). Hide / keep / mute are audited; `dedication:*`, `moderation:new` and `moderation:count` are published; N hides by moderators mute the writer automatically. The dashboard's `moderationOpen` now counts the same "needs review" set.
+- `modules/community/text-filters.ts` (links incl. spelled-out dots, whole-word profanity with leetspeak and spaced letters, crisis phrases from the settings).
+
+Tests run: `npm test` → 258 passed (239 + 19 in `p7-community.e2e.ts`).
+
+Decisions / deviations:
+- The profanity list is a built-in short English list (the settings only switch the filter on or off); crisis phrases come from the settings. Other languages need their own lists later.
+- "Needs review" = auto-flagged, or hidden by reports and not yet looked at. A post hidden because the writer is muted is not in the queue.
+- `DEDICATION_LIMIT` is counted per meditation's local day (the same Redis key as `dedicationsLeftToday`).
+
+Status: ✅ done

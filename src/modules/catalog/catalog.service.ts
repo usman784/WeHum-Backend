@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { AppError } from '../../common/errors';
-import { programDays, programProgress, programs, sessions, soundBlocks, teachers, themes } from '../../db/schema';
+import { dedications, programDays, programProgress, programs, sessions, soundBlocks, teachers, themes } from '../../db/schema';
 import { CdnSigner } from '../../infra/cdn';
 import { CacheService } from '../../infra/cache';
 import { DRIZZLE, type DB } from '../../infra/core.module';
@@ -79,6 +79,12 @@ export class CatalogService {
     };
   }
 
+  /** The newest three visible dedications (people: first name + country only). */
+  private async dedicationPreview(sessionId: string) {
+    const rows = await this.db.select().from(dedications).where(and(eq(dedications.sessionId, sessionId), eq(dedications.status, 'visible'))).orderBy(desc(dedications.createdAt)).limit(3);
+    return rows.map((d) => ({ id: d.id, firstName: d.firstName, country: d.country, text: d.text, holdingCount: d.holdingCount, createdAt: d.createdAt.toISOString() }));
+  }
+
   private teacher(t: typeof teachers.$inferSelect) {
     return {
       id: t.id, name: t.name, role: t.role, specialty: t.specialty, bio: t.bio, quote: t.quote, photoUrl: this.cdn.publicUrl(t.photoUrl),
@@ -113,7 +119,7 @@ export class CatalogService {
       return { ...toSessionSummary(s, this.cdn, covers), isSos: s.isSos, theme, teacher: teacher ? this.teacher(teacher) : null };
     });
     if (!base) throw new AppError('NOT_FOUND', 'Meditation not found');
-    return { ...base, practicedToday: await this.motd.practicedTodaySession(id), dedications: { preview: [] as unknown[] } };
+    return { ...base, practicedToday: await this.motd.practicedTodaySession(id), dedications: { preview: await this.cache.getOrSet(`dedications:${id}:p1`, 10, () => this.dedicationPreview(id)) } };
   }
 
   async programDetail(id: string, userId: string, version: number) {

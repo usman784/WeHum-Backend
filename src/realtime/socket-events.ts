@@ -50,7 +50,7 @@ export interface LiveServerToClient {
 
 // ── /admin (CMS)
 export type EntityType = 'session' | 'media' | 'theme' | 'teacher' | 'program' | 'motd' | 'dailyMessage' | 'soundBlock' | 'sos'
-  | 'config' | 'notification' | 'challenge' | 'admin' | 'user';
+  | 'config' | 'notification' | 'challenge' | 'admin' | 'user' | 'dedication';
 
 export interface AdminClientToServer {
   subscribe: (p: { channels: string[] }, ack: (r: Ack<{ joined: string[] }>) => void) => void;
