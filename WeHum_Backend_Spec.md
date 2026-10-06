@@ -1295,3 +1295,24 @@ Decisions / deviations:
 - `DEDICATION_LIMIT` is counted per meditation's local day (the same Redis key as `dedicationsLeftToday`).
 
 Status: ✅ done
+
+### Phase P8 — Push & inbox
+Date: 2026-10-06
+
+Built:
+- Devices: `POST /v1/me/devices` (register or update, a push token belongs to one phone), `DELETE /v1/me/devices/:id`. Inbox: `GET /v1/me/inbox` (keyset, `meta.unread`), `POST /v1/me/inbox/read` (`ids` or `all`). `PUT/DELETE /v1/group/remind` ("Remind me" → `lobby:remind:{date}`).
+- `PushTransport`: FCM HTTP v1 with a service-account JWT (no Firebase SDK), 50 sends in parallel, invalid tokens reported. Replaceable in tests; with no service account nothing is sent.
+- `PushService.minute` (job `push.minute`, every minute): for every time zone with reminders, users whose reminder time equals the local `HH:mm` get the daily nudge; the `push_log (user, key, local date)` primary key allows one per day (also across the repeated hour on DST days); a live daily message of the local day and the nudge are one push with the message copy (unless the person turned message pushes off); group warning once, in the minute `reminderMin` before the start, to opted-in users and "Remind me" users; announcements. Daily `push.trial` (09:00 UTC): trials ending in about 48 h get a push and an inbox item once.
+- Announcements: audience (all, members, free, trial, guests, country), send now / scheduled / at each person's reminder time, batches of 2,000 per zone and minute, quiet hours 22:00–07:00 local (those people get it at 07:00), counts delivered / failed on the notification, `notification:stats` events, inbox item per delivered person. Tokens that FCM calls invalid are cleared.
+- Admin (`/v1/admin/notifications`): list, create draft (editor too), edit with If-Match (editors: drafts only), `audience` preview (reachable people + how many are in quiet hours at the chosen time), send / cancel (owner, admin), test to an app account by email, automatic list and edit (owner, admin). All audited.
+- `PushService.markOpened` counts a tap once per person and day (the HTTP endpoint `POST /v1/analytics/events {name: push_open, key}` comes with analytics in P9).
+
+Tests run: `npm test` → 277 passed (258 + 19 in `p8-push.e2e.ts`): local clock in five zones and on both DST days, quiet hours, device token moves, inbox paging and read state, nudge across zones with first names and exactly-once, DST repeated hour, opt-outs, invalid token cleanup, message + nudge merge, group warning once, "Remind me", trial ending, announcement roles and validation, audience counts, send now with stats and inbox, quiet hours until 07:00 (05:30 still waits), scheduled, cancel, reminder-time mode, test send, automatic edit, opened counted once.
+
+Decisions / deviations:
+- The inbox item for group start (spec §8.1) and for BILLING_ISSUE / EXPIRATION (§8.4) are not written yet; the inbox mechanism (`PushService.inbox`) is ready for them.
+- "Send test to me" takes the email of an app account (the admin's phone): admin accounts and app accounts are separate.
+- An announcement counts a person as delivered when at least one of their phones accepted it.
+- Real FCM delivery was not run (no Firebase project here): only the request shape and the token cleanup rules are covered by the fake transport.
+
+Status: ✅ done

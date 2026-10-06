@@ -6,6 +6,7 @@ import { env } from '../config/env';
 import { GroupStartService } from '../realtime/group-start.service';
 import { CountersService } from '../modules/meditations/counters.service';
 import { StatsProcessor } from '../modules/meditations/stats.processor';
+import { PushService } from '../modules/push/push.service';
 import { RcProcessor } from '../modules/subscriptions/rc.processor';
 import { MediaProcessor } from './media.processor';
 import { PublishDueService } from './publish-due.service';
@@ -31,6 +32,8 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
       new Worker(QUEUES.cron, async (job) => {
         if (job.name === 'catalog.publishDue') return this.publishDue.run();
         if (job.name === 'counters.flush') return this.counters.flush();
+        if (job.name === 'push.minute') return this.moduleRef.get(PushService, { strict: false }).minute();
+        if (job.name === 'push.trial') return this.moduleRef.get(PushService, { strict: false }).trialEnding();
         if (job.name === 'rc.process') return this.rc.process(job.data.eventId);
         if (job.name === 'rc.reconcile') return this.rc.reconcile();
         // resolved lazily: the realtime module imports this one

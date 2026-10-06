@@ -28,6 +28,7 @@ const schema = z.object({
   MAIL_FROM: z.string().default('WeHum <hello@wehum.app>'),
   SMTP_URL: z.string().default(''),
   APP_LINK_BASE: z.string().default('https://wehum.app'),
+  FCM_SERVICE_ACCOUNT_JSON: z.string().default(''),
   REVENUECAT_WEBHOOK_SECRET: z.string().default(''),
   REVENUECAT_API_KEY_V2: z.string().default(''),
   REVENUECAT_PROJECT_ID: z.string().default(''),
