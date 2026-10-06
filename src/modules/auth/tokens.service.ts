@@ -31,7 +31,15 @@ export class TokensService {
 
   constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly bus: RealtimeBus) {}
 
-  private async keys() {
+  private loading?: Promise<Key>;
+
+  /** Single-flight: two first calls at once must not each make a key pair (one would then sign with a key nobody verifies). */
+  private keys() {
+    this.loading ??= this.loadKeys();
+    return this.loading;
+  }
+
+  private async loadKeys() {
     if (this.priv) return this.priv;
     if (env.JWT_PRIVATE_KEY_B64) {
       this.priv = await importPKCS8(Buffer.from(env.JWT_PRIVATE_KEY_B64, 'base64').toString(), 'EdDSA');
