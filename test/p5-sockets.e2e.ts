@@ -3,7 +3,7 @@ import type Redis from 'ioredis';
 import { Client } from 'pg';
 import type { Socket } from 'socket.io-client';
 import { v7 as uuid } from 'uuid';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REDIS, K } from '../src/infra/redis';
 import { WorkerRunner } from '../src/jobs/workers';
 import { TokensService } from '../src/modules/auth/tokens.service';
@@ -324,8 +324,9 @@ describe('P5 lobby + group start', () => {
     const payload = recs[0]!.of('group:start')[0];
     expect(payload).toMatchObject({ date: lobbyDate, startsAt: new Date(t0).toISOString(), lengthMin: 30, mediaKey: `motd:${lobbyDate}:30` });
     expect(recs.every((r) => r.of('group:start').length === 1)).toBe(true); // exactly once each
-    const joined = (await q<{ group_joined: number }>(`SELECT group_joined FROM motd_days WHERE date=$1`, [lobbyDate]))[0]?.group_joined;
-    if (joined !== undefined) expect(joined).toBe(N);
+    // the lobby size is written right after group:start is published, so wait for it instead of reading at once
+    const joinedNow = async () => (await q<{ group_joined: number }>(`SELECT group_joined FROM motd_days WHERE date=$1`, [lobbyDate]))[0]?.group_joined;
+    if ((await joinedNow()) !== undefined) await vi.waitFor(async () => expect(await joinedNow()).toBe(N), { timeout: 5000, interval: 100 });
     await setConfig('group', { startUtc: '16:00' });
   }, 120_000);
 });
