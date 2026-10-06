@@ -36,8 +36,12 @@ export class ProgramsService {
       this.db.select({ id: programProgress.programId, n: sql<number>`count(*)::int` }).from(programProgress).groupBy(programProgress.programId),
       this.db.select({ id: programProgress.programId, n: sql<number>`count(*)::int` }).from(programProgress).where(isNotNull(programProgress.completedAt)).groupBy(programProgress.programId),
     ]);
+    // Each day carries a short view of its meditation, so the CMS can show title, length and status without one request per day.
+    const used = [...new Set(days.map((d) => d.sessionId))];
+    const meds = used.length ? await this.db.select({ id: sessions.id, title: sessions.title, durationSec: sessions.durationSec, status: sessions.status, type: sessions.type, themeId: sessions.themeId })
+      .from(sessions).where(inArray(sessions.id, used)) : [];
     return rows.map((p) => ({
-      ...p, days: days.filter((d) => d.programId === p.id).map((d) => ({ day: d.day, sessionId: d.sessionId, title: d.title })),
+      ...p, days: days.filter((d) => d.programId === p.id).map((d) => ({ day: d.day, sessionId: d.sessionId, title: d.title, session: meds.find((m) => m.id === d.sessionId) ?? null })),
       kpis: { started: started.find((s) => s.id === p.id)?.n ?? 0, completed: done.find((s) => s.id === p.id)?.n ?? 0 },
     }));
   }

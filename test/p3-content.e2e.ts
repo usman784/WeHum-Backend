@@ -619,3 +619,50 @@ describe('P3 audit + transactions', () => {
     expect((await A.get('/v1/admin/jobs/xyz', mod)).status).toBe(400);
   });
 });
+
+describe('P3 list extras used by the CMS screens', () => {
+  it('sessions list: total of everything that matches (not just this page) and the SoS filter', async () => {
+    const theme = (await A.post('/v1/admin/themes', { name: `Totals ${uuid().slice(-6)}` })).body.data.id;
+    const made: string[] = [];
+    for (let i = 0; i < 5; i++) made.push((await A.post('/v1/admin/sessions', { title: `Total ${i}`, type: 'audio', themeId: theme, durationSec: 300 + i * 60 })).body.data.id);
+    await q(`UPDATE sessions SET is_sos=true, sos_order=0 WHERE id=$1`, [made[0]]);
+
+    const page1 = await A.get(`/v1/admin/sessions?theme=${theme}&limit=2`);
+    expect(page1.body.data).toHaveLength(2);
+    expect(page1.body.meta.total).toBe(5);
+    const page2 = await A.get(`/v1/admin/sessions?theme=${theme}&limit=2&cursor=${encodeURIComponent(page1.body.meta.nextCursor)}`);
+    expect(page2.body.meta.total).toBe(5); // the same on every page
+
+    const sos = await A.get(`/v1/admin/sessions?theme=${theme}&sos=true`);
+    expect(sos.body.data.map((s: { id: string }) => s.id)).toEqual([made[0]]);
+    expect(sos.body.meta.total).toBe(1);
+    expect((await A.get(`/v1/admin/sessions?theme=${theme}&sos=false`)).body.meta.total).toBe(4);
+    expect((await A.get(`/v1/admin/sessions?sos=maybe`)).status).toBe(400);
+
+    // themes and teachers carry their counts; archived meditations are not counted
+    const t = (await A.get('/v1/admin/themes')).body.data.find((x: { id: string }) => x.id === theme);
+    expect(t).toMatchObject({ sessionCount: 5, minDurationSec: 300, maxDurationSec: 540 });
+    await q(`UPDATE sessions SET status='archived' WHERE id=$1`, [made[4]]);
+    expect((await A.get('/v1/admin/themes')).body.data.find((x: { id: string }) => x.id === theme)).toMatchObject({ sessionCount: 4, maxDurationSec: 480 });
+    const empty = (await A.post('/v1/admin/themes', { name: `Empty ${uuid().slice(-6)}` })).body.data.id;
+    expect((await A.get('/v1/admin/themes')).body.data.find((x: { id: string }) => x.id === empty)).toMatchObject({ sessionCount: 0, minDurationSec: null, maxDurationSec: null });
+
+    const teacher = (await A.post('/v1/admin/teachers', { name: `Counted ${uuid().slice(-6)}` })).body.data.id;
+    await A.patch(`/v1/admin/sessions/${made[1]}`, { teacherId: teacher });
+    await A.patch(`/v1/admin/sessions/${made[2]}`, { teacherId: teacher });
+    expect((await A.get('/v1/admin/teachers')).body.data.find((x: { id: string }) => x.id === teacher).sessionCount).toBe(2);
+  });
+
+  it('programs list: each day carries a short view of its meditation; challenges carry finished counts', async () => {
+    const s = (await A.post('/v1/admin/sessions', { title: 'Program day one', type: 'audio', durationSec: 720 })).body.data;
+    const p = (await A.post('/v1/admin/programs', { title: `Extras ${uuid().slice(-6)}` })).body.data;
+    const withDays = (await A.put(`/v1/admin/programs/${p.id}/days`, { days: [{ day: 1, sessionId: s.id }] })).body.data;
+    expect(withDays.days).toEqual([{ day: 1, sessionId: s.id, title: null, session: { id: s.id, title: 'Program day one', durationSec: 720, status: 'draft', type: 'audio', themeId: null } }]);
+    expect((await A.get('/v1/admin/programs')).body.data.find((x: { id: string }) => x.id === p.id).days[0].session.title).toBe('Program day one');
+
+    const c = (await A.post('/v1/admin/challenges', { name: `Finished ${uuid().slice(-6)}`, days: 7 })).body.data;
+    const g1 = await guest(app), g2 = await guest(app);
+    await q(`INSERT INTO challenge_participants (challenge_id, user_id, completed_days, finished_at) VALUES ($1,$2,7,now()), ($1,$3,2,NULL)`, [c.id, g1.me.id, g2.me.id]);
+    expect((await A.get('/v1/admin/challenges')).body.data.find((x: { id: string }) => x.id === c.id)).toMatchObject({ participants: 2, finished: 1 });
+  });
+});

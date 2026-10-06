@@ -1,12 +1,12 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Injectable, Param, Patch, Post, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
 import { v7 as uuid } from 'uuid';
 import { z } from 'zod';
 import { AdminRoles } from '../../../common/auth';
 import { Zod } from '../../../common/zod';
-import { teachers } from '../../../db/schema';
+import { sessions, teachers } from '../../../db/schema';
 import { DRIZZLE, type DB } from '../../../infra/core.module';
 import { CONTENT_ROLES } from '../../admin-auth/rbac';
 import { AdminWriter, changed, CurrentActor, etag, lockVersioned, type Actor } from '../admin-writer';
@@ -26,7 +26,15 @@ type Row = typeof teachers.$inferSelect;
 export class TeachersService {
   constructor(@Inject(DRIZZLE) private readonly db: DB, private readonly writer: AdminWriter) {}
 
-  list() { return this.db.select().from(teachers).orderBy(asc(teachers.name), asc(teachers.id)); }
+  /** Teachers with how many meditations each one voices (archived ones not counted). */
+  async list() {
+    const [rows, counts] = await Promise.all([
+      this.db.select().from(teachers).orderBy(asc(teachers.name), asc(teachers.id)),
+      this.db.select({ id: sessions.teacherId, n: sql<number>`count(*)::int` }).from(sessions)
+        .where(sql`${sessions.teacherId} is not null and ${sessions.status} <> 'archived'`).groupBy(sessions.teacherId),
+    ]);
+    return rows.map((t) => ({ ...t, sessionCount: counts.find((x) => x.id === t.id)?.n ?? 0 }));
+  }
 
   create(actor: Actor, b: z.infer<typeof CreateDto>) {
     const id = uuid();

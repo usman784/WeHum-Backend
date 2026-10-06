@@ -1244,3 +1244,17 @@ Bugs found → fixed: none.
 Decisions / deviations from spec: CMS spec §6.3 calls for a "public `GET /v1/live`"; that route needs an app token, so a separate public route with less data was added instead of opening the app route.
 Open issues / risks: in one full run the P5 test "T0: every client in the lobby gets group:start within a second (100 clients)" failed once while the machine was busy with other test runs; it passed alone and in the next full run. Timing-sensitive under load.
 Status: ✅ done
+
+### Addendum to P3 — list extras and upload resume/cancel (added during CMS phase P3)
+Date: 2026-10-06
+Built:
+- `GET /v1/admin/sessions`: `meta.total` (everything that matches the filters, same on every page) and `sos=true|false` filter.
+- `GET /v1/admin/themes`: `sessionCount`, `minDurationSec`, `maxDurationSec` per theme (archived meditations not counted). `GET /v1/admin/teachers`: `sessionCount`.
+- `GET /v1/admin/programs`: each day carries `session {id, title, durationSec, status, type, themeId}`. `GET /v1/admin/challenges`: `finished`.
+- `POST /v1/admin/media/uploads/{id}/parts`: fresh presigned URLs for an open upload (resume after a long pause; the first URLs live one hour).
+- `DELETE /v1/admin/media/uploads/{id}`: cancel an open upload (aborts in S3, removes the asset, audited as `media.cancel`, idempotent).
+Tests run: `npm test` → 225 passed, 0 failed (4 new tests).
+Bugs found → fixed: the test "duplicate checksum…" built a "missing" id by replacing the last character with `0`; when the real id already ended in `0` it asked for the real asset and failed (1 run in 16). It now always changes the character.
+Decisions / deviations from spec: none.
+Open issues / risks: `p5-sockets.e2e.ts` failed in two full runs today (the 100-client group start, and once the admin handshake test) and passed in the runs before and after with no code change in that area. These tests are timing-sensitive when the machine is busy; if it shows up in CI they need longer waits.
+Status: ✅ done

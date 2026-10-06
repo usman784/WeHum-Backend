@@ -964,6 +964,29 @@ paths:
       responses:
         '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
         default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/media/uploads/{id}/parts:
+    post:
+      operationId: post_v1_admin_media_uploads_id_parts
+      tags: ["Media"]
+      summary: "Fresh presigned URLs for parts of an open upload (resume)"
+      description: "Auth: admin:owner,admin,editor. Body: partNumbers[]. URLs live one hour."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/media/uploads/{id}:
+    delete:
+      operationId: delete_v1_admin_media_uploads_id
+      tags: ["Media"]
+      summary: "Cancel an open upload"
+      description: "Auth: admin:owner,admin,editor. Aborts the multipart upload and removes the asset. Idempotent."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Cancelled}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /v1/admin/media/uploads/{id}/complete:
     post:
       operationId: post_v1_admin_media_uploads_id_complete

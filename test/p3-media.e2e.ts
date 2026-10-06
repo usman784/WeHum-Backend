@@ -225,7 +225,7 @@ describe('P3 media upload rules', () => {
     expect(b.status).toBe(201);
     expect(b.body.data.duplicateOf).toMatchObject({ id: a.id, name: 'dup.wav' });
     expect((await A.get('/v1/admin/media/not-a-uuid')).status).toBe(400);
-    expect((await A.get(`/v1/admin/media/${a.id!.replace(/.$/, '0')}`)).status).toBe(404);
+    expect((await A.get(`/v1/admin/media/${a.id!.replace(/.$/, (c: string) => (c === '0' ? '1' : '0'))}`)).status).toBe(404);
     expect((await A.get(`/v1/admin/media/${a.id}`, mod)).status).toBe(403);
   });
 
@@ -256,10 +256,56 @@ describe('P3 media upload rules', () => {
     expect(await s3.size(`media/${s2.body.data.id}/v1/original.mp3`)).toBeNull(); // the partial object is removed
   });
 
-  it('every step is audited (media.create / media.complete) with who did it', async () => {
+  it('resume: fresh part URLs for an open upload let it finish after the first URLs are gone', async () => {
+    const buf = randomBytes(11 * 1024 * 1024); // 2 parts
+    const start = await A.post('/v1/admin/media/uploads', { kind: 'audio', mime: 'audio/mpeg', bytes: buf.length, name: 'resume.mp3' }, editor);
+    const { id, partSize, parts } = start.body.data as { id: string; partSize: number; parts: { partNumber: number; url: string }[] };
+    expect(parts).toHaveLength(2);
+    const first = await fetch(parts[0]!.url, { method: 'PUT', body: buf.subarray(0, partSize) }); // part 1 went through, then the network dropped
+
+    const again = await A.post(`/v1/admin/media/uploads/${id}/parts`, { partNumbers: [2] }, editor);
+    expect(again.status).toBe(200);
+    expect(again.body.data.parts).toHaveLength(1);
+    expect(again.body.data.parts[0]).toMatchObject({ partNumber: 2 });
+    expect(again.body.data.parts[0].url).toContain('partNumber=2');
+    expect(Date.parse(again.body.data.expiresAt)).toBeGreaterThan(Date.now() + 3500_000); // good for another hour
+    const second = await fetch(again.body.data.parts[0].url, { method: 'PUT', body: buf.subarray(partSize) });
+    expect(second.status).toBe(200);
+    const done = await A.post(`/v1/admin/media/uploads/${id}/complete`, { parts: [{ partNumber: 1, etag: first.headers.get('etag')! }, { partNumber: 2, etag: second.headers.get('etag')! }] }, editor);
+    expect(done.status).toBe(202);
+    expect(await s3.size(`media/${id}/v1/original.mp3`)).toBe(buf.length);
+    await settle(); // random bytes are not audio: the job fails cleanly, which is not what this test is about
+
+    // rules
+    expect((await A.post(`/v1/admin/media/uploads/${id}/parts`, { partNumbers: [1] }, editor)).body.error.code).toBe('INVALID_STATE'); // already completed
+    const open = (await A.post('/v1/admin/media/uploads', { kind: 'audio', mime: 'audio/mpeg', bytes: 1000, name: 'one.mp3' }, editor)).body.data.id;
+    expect((await A.post(`/v1/admin/media/uploads/${open}/parts`, { partNumbers: [2] }, editor)).status).toBe(400); // it has one part
+    expect((await A.post(`/v1/admin/media/uploads/${open}/parts`, { partNumbers: [1, 1] }, editor)).status).toBe(400);
+    expect((await A.post(`/v1/admin/media/uploads/${open}/parts`, { partNumbers: [1] }, mod)).status).toBe(403);
+    expect((await A.post(`/v1/admin/media/uploads/${uuidNil()}/parts`, { partNumbers: [1] }, editor)).status).toBe(404);
+  });
+
+  it('cancel: the open upload and its parts are removed; a finished upload cannot be cancelled', async () => {
+    const start = await A.post('/v1/admin/media/uploads', { kind: 'audio', mime: 'audio/mpeg', bytes: 1000, name: 'cancel-me.mp3' }, editor);
+    const { id, parts } = start.body.data;
+    await fetch(parts[0].url, { method: 'PUT', body: randomBytes(1000) });
+    const del = (i: string, t = editor) => http(app).del(`/v1/admin/media/uploads/${i}`, { token: t });
+    expect((await del(id, mod)).status).toBe(403);
+    expect((await del(id)).status).toBe(204);
+    expect((await A.get(`/v1/admin/media/${id}`, editor)).status).toBe(404);
+    expect((await fetch(parts[0].url, { method: 'PUT', body: randomBytes(1000) })).status).toBe(404); // the multipart upload is gone in S3
+    expect((await del(id)).status).toBe(204); // idempotent
+    expect((await q(`SELECT 1 FROM audit_log WHERE action='media.cancel' AND target_id=$1`, [id]))).toHaveLength(1);
+
+    const [ready] = await q<{ id: string }>(`SELECT id FROM media_assets WHERE status='ready' LIMIT 1`);
+    expect((await del(ready!.id)).body.error.code).toBe('INVALID_STATE');
+    expect((await q(`SELECT 1 FROM media_assets WHERE id=$1`, [ready!.id]))).toHaveLength(1);
+  });
+
+  it('every step is audited (media.create / media.complete / media.cancel) with who did it', async () => {
     const rows = await q<{ action: string; actor_role: string }>(`SELECT action, actor_role FROM audit_log WHERE target_type='media' ORDER BY id`);
     expect(rows.length).toBeGreaterThan(10);
-    expect(new Set(rows.map((r) => r.action))).toEqual(new Set(['media.create', 'media.complete']));
+    expect(new Set(rows.map((r) => r.action))).toEqual(new Set(['media.create', 'media.complete', 'media.cancel']));
     expect(new Set(rows.map((r) => r.actor_role))).toEqual(new Set(['editor']));
   });
 });

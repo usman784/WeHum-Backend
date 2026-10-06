@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Injectable, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
@@ -27,6 +27,8 @@ const UploadDto = z.object({
   checksum: z.string().regex(/^[a-f0-9]{64}$/i, 'sha-256 hex').optional(),
 }).strict();
 const CompleteDto = z.object({ parts: z.array(z.object({ partNumber: z.number().int().min(1).max(10000), etag: z.string().min(1).max(200) }).strict()).min(1).max(10000) }).strict();
+
+const PartsDto = z.object({ partNumbers: z.array(z.number().int().min(1).max(10000)).min(1).max(1000).refine((a) => new Set(a).size === a.length, 'Duplicate part numbers') }).strict();
 
 const ext = (name: string, mime: string) => (/\.([a-z0-9]{1,5})$/i.exec(name)?.[1] ?? mime.split('/')[1] ?? 'bin').toLowerCase();
 
@@ -60,6 +62,37 @@ export class MediaAdminService {
       id, uploadId, partSize: PART_SIZE, parts, expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       duplicateOf: duplicate ? { id: duplicate.id, name: duplicate.name } : null,
     };
+  }
+
+  private async uploading(id: string) {
+    const [m] = await this.db.select().from(mediaAssets).where(eq(mediaAssets.id, id));
+    if (!m) throw new AppError('NOT_FOUND', 'Upload not found');
+    if (m.status !== 'uploading') throw new AppError('INVALID_STATE', 'This upload was already completed');
+    const raw = await this.redis.get(K.upload(id));
+    if (!raw) throw new AppError('INVALID_STATE', 'This upload expired. Start it again.');
+    return { m, st: JSON.parse(raw) as UploadState };
+  }
+
+  /** Fresh part URLs for an upload that is still open: lets the browser resume after a long pause (the first URLs live one hour). */
+  async presignAgain(id: string, partNumbers: number[]) {
+    const { st } = await this.uploading(id);
+    if (partNumbers.some((n) => n > st.partCount)) throw new AppError('VALIDATION_FAILED', `This upload has ${st.partCount} parts`, { fields: [{ path: 'partNumbers', message: `1…${st.partCount}` }] });
+    const parts = await Promise.all(partNumbers.map(async (n) => ({ partNumber: n, url: await this.s3.presignPart(st.key, st.uploadId, n, 3600) })));
+    return { id, parts, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
+  }
+
+  /** The admin cancelled: drop the parts in S3 and the asset row. Safe to call twice. */
+  async cancel(actor: Actor, id: string) {
+    const [m] = await this.db.select().from(mediaAssets).where(eq(mediaAssets.id, id));
+    if (!m) return;
+    if (m.status !== 'uploading') throw new AppError('INVALID_STATE', 'This upload was already completed');
+    const raw = await this.redis.get(K.upload(id));
+    if (raw) { const st = JSON.parse(raw) as UploadState; await this.s3.abortMultipart(st.key, st.uploadId); }
+    await this.writer.run(actor, { action: 'media.cancel', type: 'media', id }, async (tx) => {
+      await tx.delete(mediaAssets).where(and(eq(mediaAssets.id, id), eq(mediaAssets.status, 'uploading')));
+      return { result: null, before: { name: m.originalName, bytes: m.bytes } };
+    });
+    await this.redis.del(K.upload(id));
   }
 
   async complete(actor: Actor, id: string, parts: z.infer<typeof CompleteDto>['parts']) {
@@ -117,6 +150,12 @@ export class MediaAdminController {
 
   @HttpCode(202) @Post('uploads/:id/complete')
   complete(@CurrentActor() a: Actor, @Param('id', new Zod(IdParam)) id: string, @Body(new Zod(CompleteDto)) b: z.infer<typeof CompleteDto>) { return this.media.complete(a, id, b.parts); }
+
+  @HttpCode(200) @Post('uploads/:id/parts')
+  parts(@Param('id', new Zod(IdParam)) id: string, @Body(new Zod(PartsDto)) b: z.infer<typeof PartsDto>) { return this.media.presignAgain(id, b.partNumbers); }
+
+  @HttpCode(204) @Delete('uploads/:id')
+  async cancel(@CurrentActor() a: Actor, @Param('id', new Zod(IdParam)) id: string) { await this.media.cancel(a, id); }
 
   @Get(':id') get(@Param('id', new Zod(IdParam)) id: string) { return this.media.get(id); }
 }

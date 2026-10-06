@@ -26,7 +26,18 @@ type Row = typeof themes.$inferSelect;
 export class ThemesService {
   constructor(@Inject(DRIZZLE) private readonly db: DB, private readonly writer: AdminWriter) {}
 
-  list() { return this.db.select().from(themes).orderBy(asc(themes.order), asc(themes.id)); }
+  /** Themes in app order, each with how many meditations it holds (archived ones not counted) and their shortest / longest length. */
+  async list() {
+    const [rows, counts] = await Promise.all([
+      this.db.select().from(themes).orderBy(asc(themes.order), asc(themes.id)),
+      this.db.select({ id: sessions.themeId, n: sql<number>`count(*)::int`, min: sql<number | null>`min(${sessions.durationSec})::int`, max: sql<number | null>`max(${sessions.durationSec})::int` })
+        .from(sessions).where(sql`${sessions.themeId} is not null and ${sessions.status} <> 'archived'`).groupBy(sessions.themeId),
+    ]);
+    return rows.map((t) => {
+      const c = counts.find((x) => x.id === t.id);
+      return { ...t, sessionCount: c?.n ?? 0, minDurationSec: c?.min ?? null, maxDurationSec: c?.max ?? null };
+    });
+  }
 
   async create(actor: Actor, b: z.infer<typeof CreateDto>) {
     const id = uuid();

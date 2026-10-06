@@ -39,6 +39,7 @@ const ListQuery = z.object({
   status: z.enum(['draft', 'scheduled', 'live', 'archived']).optional(),
   q: z.string().trim().min(1).max(60).optional(), theme: uuidDto.optional(), teacher: uuidDto.optional(),
   type: z.enum(['audio', 'video', 'youtube']).optional(), access: z.enum(['free', 'premium']).optional(),
+  sos: z.enum(['true', 'false']).transform((v) => v === 'true').optional(), // CMS "SoS" tab
   sort: z.enum(['updated', 'title', 'plays', 'published']).default('updated'), ...cursorQuery,
 });
 const TAB_STATUS = { published: 'live', drafts: 'draft', scheduled: 'scheduled', archived: 'archived' } as const;
@@ -67,14 +68,17 @@ export class SessionsAdminService {
     const conds: (SQL | undefined)[] = [
       status ? eq(sessions.status, status) : undefined, q.theme ? eq(sessions.themeId, q.theme) : undefined, q.teacher ? eq(sessions.teacherId, q.teacher) : undefined,
       q.type ? eq(sessions.type, q.type) : undefined, q.access ? eq(sessions.access, q.access) : undefined,
+      q.sos === undefined ? undefined : eq(sessions.isSos, q.sos),
       q.q ? or(ilike(sessions.title, `%${q.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`), sql`${sessions.tags} @> ARRAY[${q.q.toLowerCase()}]::text[]`) : undefined,
     ];
+    // How many match the filters in all (the CMS shows "Showing 30 of 142"); counted before the cursor narrows the page.
+    const [{ total }] = await this.db.select({ total: sql<number>`count(*)::int` }).from(sessions).where(and(...conds)) as [{ total: number }];
     const c = decodeCursor(q.cursor);
     if (c) conds.push(sort.dir === 'desc' ? sql`(${sort.expr}, ${sessions.id}) < (${String(c.k)}::${sql.raw(sort.cast)}, ${c.id}::uuid)` : sql`(${sort.expr}, ${sessions.id}) > (${String(c.k)}::${sql.raw(sort.cast)}, ${c.id}::uuid)`);
     const dir = sort.dir === 'desc' ? sql`desc` : sql`asc`;
     const rows = await this.db.select({ s: sessions, k: sql<string>`${sort.expr}::text` }).from(sessions).where(and(...conds)).orderBy(sql`${sort.expr} ${dir}`, sql`${sessions.id} ${dir}`).limit(limit + 1);
     const page = rows.slice(0, limit);
-    return { data: await this.view(page.map((r) => r.s)), meta: { nextCursor: rows.length > limit ? encodeCursor(page.at(-1)!.k, page.at(-1)!.s.id) : null } };
+    return { data: await this.view(page.map((r) => r.s)), meta: { nextCursor: rows.length > limit ? encodeCursor(page.at(-1)!.k, page.at(-1)!.s.id) : null, total } };
   }
 
   async get(id: string) {

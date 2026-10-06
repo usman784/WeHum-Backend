@@ -29,9 +29,10 @@ export class ChallengesService {
   async list() {
     const [rows, counts] = await Promise.all([
       this.db.select().from(challenges).orderBy(desc(challenges.createdAt), desc(challenges.id)),
-      this.db.select({ id: challengeParticipants.challengeId, n: sql<number>`count(*)::int` }).from(challengeParticipants).groupBy(challengeParticipants.challengeId),
+      this.db.select({ id: challengeParticipants.challengeId, n: sql<number>`count(*)::int`, done: sql<number>`(count(*) filter (where ${challengeParticipants.finishedAt} is not null))::int` })
+        .from(challengeParticipants).groupBy(challengeParticipants.challengeId),
     ]);
-    return rows.map((c) => ({ ...c, participants: counts.find((x) => x.id === c.id)?.n ?? 0 }));
+    return rows.map((c) => { const x = counts.find((k) => k.id === c.id); return { ...c, participants: x?.n ?? 0, finished: x?.done ?? 0 }; });
   }
 
   create(actor: Actor, b: z.infer<typeof CreateDto>) {
