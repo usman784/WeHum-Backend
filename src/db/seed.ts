@@ -35,6 +35,15 @@ const AUTO = [
   ['trial_ending', 'Your trial ends in 2 days', 'Keep meditating with everyone. Manage your membership anytime.'],
 ];
 
+const BREATH: [string, string, number, number, number, number][] = [
+  ['Calming', 'Longer out-breath', 4, 7, 8, 0],
+  ['Focus', 'Box breathing', 4, 4, 4, 4],
+  ['Energy', 'Quick, bright rounds', 2, 0, 2, 0],
+  ['Vagus nerve', 'Slow hum on the out', 4, 0, 6, 0],
+  ['Anxiety', 'Even, steady pace', 5, 0, 5, 0],
+  ['Sleep', 'Heavy and slow', 4, 2, 8, 0],
+];
+
 const slug = (t: string) => t.toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 const day = (d: Date) => d.toISOString().slice(0, 10); // UTC dates (the MOTD / group time are UTC)
 
@@ -52,6 +61,13 @@ export async function seed(url?: string) {
       id: uuid(), email: env.SEED_OWNER_EMAIL, name: 'Owner', role: 'owner', status: 'active',
       passwordHash: await argon2.hash(env.SEED_OWNER_PASSWORD, { type: argon2.argon2id }),
     }).onConflictDoNothing();
+
+    // breathwork templates (app screen 71), only once
+    const hasPatterns = await db.select({ n: sql<number>`count(*)::int` }).from(s.breathPatterns);
+    if (!hasPatterns[0]?.n) {
+      for (const [i, [name, subtitle, inhaleSec, hold1Sec, exhaleSec, hold2Sec]] of BREATH.entries())
+        await db.insert(s.breathPatterns).values({ id: uuid(), name, subtitle, inhaleSec, hold1Sec, exhaleSec, hold2Sec, sort: i, status: 'live' });
+    }
 
     const already = await db.select({ n: sql<number>`count(*)::int` }).from(s.themes);
     if ((already[0]?.n ?? 0) > 0) { console.log('catalog already seeded'); return; }

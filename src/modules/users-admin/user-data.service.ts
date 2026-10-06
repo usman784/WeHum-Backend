@@ -51,8 +51,15 @@ export class UserDataService {
         q(sql`SELECT type, title, body, created_at, read_at FROM inbox_items WHERE user_id = ${userId} ORDER BY created_at`),
         q(sql`SELECT name, at FROM analytics_events WHERE user_id = ${userId} ORDER BY at LIMIT 5000`),
       ]);
+      // P11 (coming soon): own posts, patterns, challenges and milestones
+      const [gratitude, breathPatterns, challenges, milestones] = await Promise.all([
+        q(sql`SELECT id, kind::text, text, status::text, created_at FROM gratitude_posts WHERE user_id = ${userId} ORDER BY created_at`),
+        q(sql`SELECT name, inhale_sec, hold1_sec, exhale_sec, hold2_sec, rounds, created_at FROM user_breath_patterns WHERE user_id = ${userId} ORDER BY created_at`),
+        q(sql`SELECT c.name, p.joined_at, p.completed_days, p.finished_at FROM challenge_participants p JOIN challenges c ON c.id = p.challenge_id WHERE p.user_id = ${userId}`),
+        q(sql`SELECT key, reached_at FROM user_milestones WHERE user_id = ${userId} ORDER BY reached_at`),
+      ]);
       await this.progress(jobId, { progress: 60 });
-      const doc = { exportedAt: new Date().toISOString(), user: u, identities, devices, stats: stats[0] ?? null, dailyStats: daily, meditations, recipes, dedications, blocks, entitlement: entitlement[0] ?? null, inbox, events };
+      const doc = { exportedAt: new Date().toISOString(), user: u, identities, devices, stats: stats[0] ?? null, dailyStats: daily, meditations, recipes, dedications, blocks, entitlement: entitlement[0] ?? null, inbox, events, gratitude, breathPatterns, challenges, milestones };
       const base = `exports/${userId}/${jobId}`;
       await this.s3.putBuffer(`${base}.json`, Buffer.from(JSON.stringify(doc, null, 2)), 'application/json');
       await this.s3.putBuffer(`${base}-meditations.csv`, Buffer.from(toCsv(meditations)), 'text/csv');
@@ -77,6 +84,7 @@ export class UserDataService {
       for (const k of keys) await this.s3.remove(k);
       await this.progress(jobId, { progress: 55 });
       const removed = await this.db.execute<{ id: string; session_id: string }>(sql`SELECT id, session_id FROM dedications WHERE user_id = ${userId} AND status = 'visible'`);
+      const removedPosts = await this.db.execute<{ id: string; kind: string }>(sql`SELECT id, kind::text FROM gratitude_posts WHERE user_id = ${userId} AND status = 'visible'`);
       await this.db.transaction(async (tx) => {
         await tx.execute(sql`DELETE FROM analytics_events WHERE user_id = ${userId}`);
         await tx.execute(sql`DELETE FROM push_log WHERE user_id = ${userId}`);
@@ -86,6 +94,7 @@ export class UserDataService {
         await tx.insert(auditLog).values({ actorId: adminId, actorRole: adminId ? 'admin' : 'system', action: 'user.delete', targetType: 'user', targetId: userId, after: { exportsDeleted: keys.length, dedicationsRemoved: removed.rows.length, revenueCat: true }, requestId: jobId.slice(0, 40) });
       });
       for (const d of removed.rows) await this.bus.publish('dedication:removed', { sessionId: d.session_id, id: d.id });
+      for (const p of removedPosts.rows) await this.bus.publish('gratitude:removed', { kind: p.kind, id: p.id });
       await this.bus.publish('force:logout', { scope: 'user', id: userId, reason: 'account_deleted' }).catch(() => null);
       await this.bus.publish('moderation:count', { open: (await this.db.select({ n: sql<number>`count(*)::int` }).from(dedications).where(NEEDS_REVIEW))[0]!.n }).catch(() => null);
       await this.progress(jobId, { status: 'done', progress: 100, result: { deleted: true } });

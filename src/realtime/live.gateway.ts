@@ -27,7 +27,8 @@ const RoomJoin = z.object({ room: z.string().max(60) }).strict();
 /** today | world | motd:{date} | session:{uuid} | lobby:{date} */
 const validRoom = (room: string) => room === 'today' || room === 'world'
   || (/^(motd|lobby):/.test(room) && date.safeParse(room.slice(room.indexOf(':') + 1)).success)
-  || (room.startsWith('session:') && z.string().uuid().safeParse(room.slice(8)).success);
+  || (room.startsWith('session:') && z.string().uuid().safeParse(room.slice(8)).success)
+  || /^gratitude:(gratitude|affirmation|love)$/.test(room);
 const TimeSync = z.object({ t0: z.number() }).strict();
 const PresenceStart = z.object({
   meditationId: z.string().uuid(), sessionId: z.string().uuid().optional(), kind: z.enum(['motd', 'group', 'solo', 'silence', 'custom', 'program', 'sos', 'free']),

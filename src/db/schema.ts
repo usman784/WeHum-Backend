@@ -33,6 +33,7 @@ export const adminStatus = pgEnum('admin_status', ['invited', 'active', 'disable
 export const jobType = pgEnum('job_type', ['media_probe', 'media_loudness', 'media_transcode', 'image_process', 'youtube_resolve', 'user_export', 'user_delete', 'push_send', 'rc_reconcile']);
 export const jobStatus = pgEnum('job_status', ['queued', 'running', 'done', 'failed', 'cancelled']);
 export const notificationStatus = pgEnum('notification_status', ['draft', 'scheduled', 'sending', 'sent', 'cancelled', 'failed']);
+export const gratitudeKind = pgEnum('gratitude_kind', ['gratitude', 'affirmation', 'love']);
 export const audience = pgEnum('audience', ['all', 'members', 'free', 'trial', 'guests', 'country', 'founding']);
 export const sendMode = pgEnum('send_mode', ['now', 'user_reminder_time', 'scheduled']);
 export const emailTokenPurpose = pgEnum('email_token_purpose', ['verify', 'magic_link', 'password_reset', 'admin_invite', 'admin_reset']);
@@ -293,8 +294,10 @@ export const challengeParticipants = pgTable('challenge_participants', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   joinedAt: ts('joined_at').notNull().defaultNow(),
   completedDays: integer('completed_days').notNull().default(0),
+  /** The user's local date of the last day that counted (one count per day; missed days never reset progress). */
+  lastDay: date('last_day'),
   finishedAt: ts('finished_at'),
-}, (t) => [primaryKey({ columns: [t.challengeId, t.userId] })]);
+}, (t) => [primaryKey({ columns: [t.challengeId, t.userId] }), index('challenge_participants_user_idx').on(t.userId)]);
 
 export const motdDays = pgTable('motd_days', {
   date: date('date').primaryKey(),
@@ -614,3 +617,70 @@ export const analyticsEvents = pgTable('analytics_events', {
   appVersion: varchar('app_version', { length: 20 }),
   at: ts('at').notNull(),
 }, (t) => [index('analytics_name_at_idx').on(t.name, t.at), index('analytics_at_idx').on(t.at)]);
+
+
+// ───────────── P11 coming soon: gratitude feed, breathwork, milestones
+
+/** One post in the gratitude feed (app screen 70). Same rules as dedications: members post, moderated, first name + country only. */
+export const gratitudePosts = pgTable('gratitude_posts', {
+  id: uuid('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind: gratitudeKind('kind').notNull().default('gratitude'),
+  firstName: varchar('first_name', { length: 30 }).notNull(),
+  country: char('country', { length: 2 }),
+  text: varchar('text', { length: 200 }).notNull(),
+  status: dedicationStatus('status').notNull().default('visible'),
+  autoFlags: text('auto_flags').array().notNull().default(sql`'{}'::text[]`),
+  reportCount: integer('report_count').notNull().default(0),
+  moderatedBy: uuid('moderated_by'),
+  moderatedAt: ts('moderated_at'),
+  createdAt: createdAt(),
+}, (t) => [
+  index('gratitude_kind_status_idx').on(t.kind, t.status, t.createdAt.desc()),
+  index('gratitude_status_idx').on(t.status, t.createdAt.desc()),
+  index('gratitude_user_idx').on(t.userId, t.createdAt.desc()),
+]);
+
+export const gratitudeReports = pgTable('gratitude_reports', {
+  postId: uuid('post_id').notNull().references(() => gratitudePosts.id, { onDelete: 'cascade' }),
+  reporterId: uuid('reporter_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  reason: varchar('reason', { length: 20 }).notNull(),
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.postId, t.reporterId] })]);
+
+/** Breathing templates the team curates (app screen 71 "Start from a template"): seconds per beat. */
+export const breathPatterns = pgTable('breath_patterns', {
+  id: uuid('id').primaryKey(),
+  name: varchar('name', { length: 40 }).notNull(),
+  subtitle: varchar('subtitle', { length: 80 }).notNull().default(''),
+  inhaleSec: integer('inhale_sec').notNull(),
+  hold1Sec: integer('hold1_sec').notNull().default(0),
+  exhaleSec: integer('exhale_sec').notNull(),
+  hold2Sec: integer('hold2_sec').notNull().default(0),
+  rounds: integer('rounds').notNull().default(10),
+  sort: integer('sort').notNull().default(0),
+  status: contentStatus('status').notNull().default('draft'),
+  version: integer('version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** Patterns a person made in the pattern designer (app screen 72). */
+export const userBreathPatterns = pgTable('user_breath_patterns', {
+  id: uuid('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 40 }).notNull(),
+  inhaleSec: integer('inhale_sec').notNull(),
+  hold1Sec: integer('hold1_sec').notNull().default(0),
+  exhaleSec: integer('exhale_sec').notNull(),
+  hold2Sec: integer('hold2_sec').notNull().default(0),
+  rounds: integer('rounds').notNull().default(10),
+  createdAt: createdAt(),
+}, (t) => [index('user_breath_patterns_user_idx').on(t.userId, t.createdAt.desc())]);
+
+/** When a person first reached each milestone (app screen 73). Written when first seen reached. */
+export const userMilestones = pgTable('user_milestones', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  key: varchar('key', { length: 40 }).notNull(),
+  reachedAt: ts('reached_at').notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.userId, t.key] })]);

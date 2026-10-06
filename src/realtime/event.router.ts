@@ -80,6 +80,8 @@ export class EventRouter implements OnModuleInit {
       case 'dedication:new': live.to(`session:${p.sessionId}`).emit('dedication:new', { sessionId: p.sessionId, items: p.items }); break;
       case 'dedication:holding': live.to(`session:${p.sessionId}`).emit('dedication:holding', { id: p.id, holdingCount: p.holdingCount }); break;
       case 'dedication:removed': live.to(`session:${p.sessionId}`).emit('dedication:removed', { id: p.id }); break;
+      case 'gratitude:new': live.to(`gratitude:${p.kind}`).emit('gratitude:new', { kind: p.kind, item: p.item }); break;
+      case 'gratitude:removed': live.to(`gratitude:${p.kind}`).emit('gratitude:removed', { kind: p.kind, id: p.id }); break;
       case 'moderation:new': admin.to('moderation').emit('moderation:new', p); break;
       case 'moderation:count': admin.to('role:owner').to('role:admin').to('role:moderator').emit('moderation:count', p); break;
       case 'subs:event': admin.to('subscriptions').emit('subs:event', p); break;

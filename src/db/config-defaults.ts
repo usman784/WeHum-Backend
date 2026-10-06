@@ -15,5 +15,6 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   },
   moderation: { dailyLimit: 3, autoHideReports: 3, blockLinks: true, profanity: true, crisisWords: ['suicide', 'kill myself', 'end my life', 'self harm', 'self-harm'], muteAfterHides: 3 },
   legal: { privacyUrl: 'https://wehum.app/privacy', termsUrl: 'https://wehum.app/terms', healthDisclaimer: 'WeHum is meditation training, not therapy or medical care.', deleteInactiveGuestsMonths: 12 },
+  breathwork: { lessons: [] },
   catalog: { version: 1 },
 };

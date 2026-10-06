@@ -4,6 +4,7 @@ import type Redis from 'ioredis';
 import { meditations, motdDays, userDailyStats, userStats } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { K, REDIS } from '../../infra/redis';
+import { applyChallengeDay } from '../coming-soon/challenge-progress';
 import { CountersService } from './counters.service';
 
 const APPLIED_TTL_SEC = 7 * 86_400;
@@ -36,6 +37,7 @@ export class StatsProcessor {
               lastMeditationAt: sql`greatest(coalesce(${userStats.lastMeditationAt}, ${m.endedAt}), ${m.endedAt})`, updatedAt: new Date(),
             } });
           if (m.kind === 'motd') await tx.update(motdDays).set({ soloCount: sql`${motdDays.soloCount} + 1` }).where(eq(motdDays.date, m.localDate));
+          await applyChallengeDay(tx, m); // P11: open challenges move forward one day
         }
         return m;
       });

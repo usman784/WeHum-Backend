@@ -38,6 +38,8 @@ export const CONFIG_SCHEMAS = {
     dailyLimit: z.number().int().min(1).max(20), autoHideReports: z.number().int().min(1).max(50), blockLinks: flag, profanity: flag,
     crisisWords: z.array(z.string().trim().min(2).max(40)).max(100), muteAfterHides: z.number().int().min(1).max(20),
   }).strict(),
+  /** Breathwork (P11): the lessons with Raphael, in order (published sessions). */
+  breathwork: z.object({ lessons: z.array(z.string().uuid()).max(20) }).strict(),
   legal: z.object({ privacyUrl: url, termsUrl: url, healthDisclaimer: z.string().max(1000), deleteInactiveGuestsMonths: z.number().int().min(1).max(60) }).strict(),
 } as const;
 export type ConfigKey = keyof typeof CONFIG_SCHEMAS;
@@ -100,9 +102,15 @@ export class ConfigAdminController {
 
   @AdminRoles(...MANAGER_ROLES) @Put('config/:key')
   put(@CurrentActor() a: Actor, @Param('key', ConfigKeys) key: ConfigKey, @Body() b: unknown, @Headers('if-match') m: string | undefined, @Res({ passthrough: true }) res: FastifyReply) {
-    if (key === 'today' || key === 'group') throw new AppError('FORBIDDEN', `Use the ${key} screen`); // owners/admins can still use /config/today and /group
+    if (key === 'today' || key === 'group' || key === 'breathwork') throw new AppError('FORBIDDEN', `Use the ${key} screen`); // owners/admins can still use /config/today and /group
     return this.save(a, key, b, m, res);
   }
+
+  @AdminRoles(...CONTENT_ROLES) @Get('breathwork')
+  async breathwork(@Res({ passthrough: true }) res: FastifyReply) { const c = await this.config.get('breathwork'); res.header('etag', etag(c.version)); return c; }
+
+  @AdminRoles(...CONTENT_ROLES) @Put('breathwork')
+  putBreathwork(@CurrentActor() a: Actor, @Body() b: unknown, @Headers('if-match') m: string | undefined, @Res({ passthrough: true }) res: FastifyReply) { return this.save(a, 'breathwork', b, m, res); }
 
   @AdminRoles(...CONTENT_ROLES) @Put('group')
   putGroup(@CurrentActor() a: Actor, @Body() b: unknown, @Headers('if-match') m: string | undefined, @Res({ passthrough: true }) res: FastifyReply) { return this.save(a, 'group', b, m, res); }
