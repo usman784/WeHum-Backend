@@ -1,6 +1,6 @@
 import {
   AbortMultipartUploadCommand, CompleteMultipartUploadCommand, CreateBucketCommand, CreateMultipartUploadCommand, DeleteObjectCommand,
-  GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, UploadPartCommand,
+  GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
@@ -71,6 +71,23 @@ export class S3Service {
   }
 
   async remove(key: string) { await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key })).catch(() => null); }
+
+  /** A link that works for `ttlSec` (user data exports). */
+  presignGet(key: string, ttlSec = 86_400) {
+    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: ttlSec });
+  }
+
+  /** Every key under a prefix (a user's exports). */
+  async listKeys(prefix: string): Promise<string[]> {
+    const out: string[] = [];
+    let token: string | undefined;
+    do {
+      const r = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }));
+      out.push(...(r.Contents ?? []).map((o) => o.Key!));
+      token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  }
 
   destroy() { this.client.destroy(); }
 }

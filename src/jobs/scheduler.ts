@@ -40,6 +40,9 @@ export class SchedulerService implements OnModuleInit, OnApplicationShutdown {
   /** Idempotent: re-registering the same scheduler id just updates it. */
   async register() {
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('catalog.publishDue', { every: 60_000 }, { name: 'catalog.publishDue', opts: { removeOnComplete: 100, removeOnFail: 500 } });
+    await this.queues.queue(QUEUES.cron).upsertJobScheduler('analytics.rollup', { pattern: '5 * * * *' }, { name: 'analytics.rollup', opts: { removeOnComplete: 48, removeOnFail: 100 } });
+    await this.queues.queue(QUEUES.cron).upsertJobScheduler('analytics.final', { pattern: '30 0 * * *' }, { name: 'analytics.rollup', opts: { removeOnComplete: 7, removeOnFail: 100 } });
+    await this.queues.queue(QUEUES.cron).upsertJobScheduler('data.lifecycle', { pattern: '0 3 * * *' }, { name: 'data.lifecycle', opts: { removeOnComplete: 7, removeOnFail: 100 } });
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('push.minute', { every: 60_000 }, { name: 'push.minute', opts: { removeOnComplete: 100, removeOnFail: 500 } });
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('push.trial', { pattern: '0 9 * * *' }, { name: 'push.trial', opts: { removeOnComplete: 30, removeOnFail: 100 } });
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('rc.reconcile', { every: 86_400_000 }, { name: 'rc.reconcile', opts: { removeOnComplete: 30, removeOnFail: 100 } });

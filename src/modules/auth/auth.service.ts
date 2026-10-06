@@ -81,6 +81,8 @@ export class AuthService {
       const deviceId = await this.upsertDevice(tx, userId, d);
       return { userId, deviceId, created };
     });
+    // the CMS Users list shows "N new"; after the commit, so the person exists when the screen reloads
+    if (out.created) void this.redis.publish('events', JSON.stringify({ topic: 'users:new', payload: { count: 1 } })).catch(() => null);
     return { ...(await this.session(out.userId, out.deviceId, d.installId)), created: out.created };
   }
 

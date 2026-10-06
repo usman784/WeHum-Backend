@@ -7,6 +7,7 @@ import { SubscriptionsAdminController, SubscriptionsAdminService } from './subsc
 
 @Module({
   imports: [AuthModule, JobsModule],
+  exports: [SubscriptionsAdminService],
   controllers: [RevenueCatWebhookController, EntitlementSyncController, SubscriptionsAdminController],
   providers: [SubscriptionsAdminService, AdminWriter],
 })

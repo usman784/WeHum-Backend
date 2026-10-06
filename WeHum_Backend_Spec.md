@@ -1316,3 +1316,25 @@ Decisions / deviations:
 - Real FCM delivery was not run (no Firebase project here): only the request shape and the token cleanup rules are covered by the fake transport.
 
 Status: ✅ done
+
+### Phase P9 — Analytics & admin data
+Date: 2026-10-06
+
+Built:
+- `POST /v1/analytics/events` (≤ 50 per call, 202, name `[a-z0-9_]{2,40}`, small flat props, time clamped to the last 7 days and not in the future); `push_open {key}` also counts the tap on the notification.
+- Rollup (`AnalyticsService.rollup`, jobs `analytics.rollup` at :05 each hour and at 00:30 UTC for the day before): meditations, minutes, group, active users, new users, new trials, new paid (first purchase without trial + first renewal after a trial), cancellations, revenue (USD from the events), peak of people meditating together (`live:peak:{date}` kept by the ticker), country and theme maps, funnel counts. Idempotent.
+- Admin: `GET /v1/admin/dashboard` (moderators get only `moderationOpen` + the reported-posts alert), `GET /v1/admin/analytics?period=7|14|30|90` (KPIs with change against the period before, per day solo/group, themes top 5 + other, countries top 4 + other, peak), `…/funnel`, `…/retention` (D1 / D7 / D30), `…/export` (CSV).
+- Users: `GET /v1/admin/users` (tabs all / guests / free / trial / annual / monthly / cancelled; search by id, email prefix or name; keyset; `meta.counts`), `GET /v1/admin/users/:id` (stats, recent meditations, dedications, membership with plain-words label and RevenueCat id, guest → account history), `GET /v1/admin/users/export` (CSV, ≤ 100,000 rows), `POST /v1/admin/users/:id/export` (job: JSON + meditations CSV in storage, links valid 24 h), `DELETE /v1/admin/users/:id` (job; the email, or the first 8 characters of the id for guests, must be typed). Delete order: RevenueCat first (a failure changes nothing and the job can be run again), then storage, then the database (everything cascades); money events stay without the person; audit entry has no personal data; `dedication:removed` and `force:logout` are announced.
+- Nightly `data.lifecycle` (03:00 UTC): analytics events older than 13 months, expired refresh tokens, guests unused for N months (setting) without an entitlement.
+- `users:new` is published when a guest is created (the CMS shows "N new").
+
+Tests run: `npm test` → 296 passed (277 + 19 in `p9-analytics.e2e.ts`): ingest, rollup math (every number), peak, trends / funnel / retention / CSV, dashboard and needs-attention, users list / detail / CSV, export job, delete (RevenueCat fake, storage, cascade, no personal data in audit), failed delete can be re-run, nightly lifecycle.
+
+Decisions / deviations:
+- Time zone: all days are UTC. `tz=Europe/Berlin` (spec §5.5) is refused with 400 instead of showing UTC numbers under a Berlin label; it needs a second set of aggregates.
+- "Active users" over a period is a distinct count over `meditations` (indexed), not a sum of daily numbers; everything else reads `daily_aggregates`.
+- `analytics_events` is a normal table (no monthly partitions yet); old rows are deleted by the nightly job.
+- The user CSV is streamed from the request instead of being a job (one query, capped at 100,000 rows).
+- Raw SQL rows give timestamps as text; `membershipOf` converts them (found by a test).
+
+Status: ✅ done

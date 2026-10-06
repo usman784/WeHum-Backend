@@ -6,6 +6,8 @@ import { env } from '../config/env';
 import { GroupStartService } from '../realtime/group-start.service';
 import { CountersService } from '../modules/meditations/counters.service';
 import { StatsProcessor } from '../modules/meditations/stats.processor';
+import { AnalyticsService } from '../modules/analytics/analytics.service';
+import { UserDataService } from '../modules/users-admin/user-data.service';
 import { PushService } from '../modules/push/push.service';
 import { RcProcessor } from '../modules/subscriptions/rc.processor';
 import { MediaProcessor } from './media.processor';
@@ -32,6 +34,10 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
       new Worker(QUEUES.cron, async (job) => {
         if (job.name === 'catalog.publishDue') return this.publishDue.run();
         if (job.name === 'counters.flush') return this.counters.flush();
+        if (job.name === 'analytics.rollup') return this.moduleRef.get(AnalyticsService, { strict: false }).rollupRecent();
+        if (job.name === 'data.lifecycle') return this.moduleRef.get(AnalyticsService, { strict: false }).lifecycle();
+        if (job.name === 'user.export') return this.moduleRef.get(UserDataService, { strict: false }).exportUser(job.data.jobId, job.data.userId);
+        if (job.name === 'user.delete') return this.moduleRef.get(UserDataService, { strict: false }).deleteUser(job.data.jobId, job.data.userId, job.data.adminId ?? null);
         if (job.name === 'push.minute') return this.moduleRef.get(PushService, { strict: false }).minute();
         if (job.name === 'push.trial') return this.moduleRef.get(PushService, { strict: false }).trialEnding();
         if (job.name === 'rc.process') return this.rc.process(job.data.eventId);

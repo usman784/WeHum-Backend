@@ -58,6 +58,9 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
     const snap = await this.live.snapshot(utcDay(now));
     const key = hash({ t: snap.total, c: snap.countries, top: snap.top, q: snap.quiet, m: snap.meditatedToday, v: snap.vibration });
     await this.redis.set(K.liveAggLast, JSON.stringify(snap), 'EX', 3600);
+    // the day's highest number of people meditating together; the rollup writes it to `daily_aggregates.peak_live`
+    const peakKey = `live:peak:${utcDay(now)}`;
+    if ((snap.total ?? 0) > (Number(await this.redis.get(peakKey)) || 0)) await this.redis.set(peakKey, String(snap.total), 'EX', 3 * 86_400);
     let published = 0;
     if (key !== this.lastAgg) {
       this.lastAgg = key;

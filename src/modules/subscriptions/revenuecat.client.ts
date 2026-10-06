@@ -52,6 +52,11 @@ export class RevenueCatClient {
     });
   }
 
+  /** Account deletion: RevenueCat forgets this subscriber (their store subscription is not cancelled by this). */
+  async deleteSubscriber(appUserId: string) {
+    await this.call(`/v1/subscribers/${encodeURIComponent(appUserId)}`, { method: 'DELETE' });
+  }
+
   /** Make `regular` the current offering (the Founding offer is over). Idempotent on RevenueCat's side. */
   async switchOffering(lookupKey: string) {
     await this.call(`/v2/projects/${env.REVENUECAT_PROJECT_ID}/offerings/${encodeURIComponent(lookupKey)}`, { method: 'POST', body: JSON.stringify({ is_current: true }) });
