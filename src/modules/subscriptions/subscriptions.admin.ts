@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Inject, Injectable, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Injectable, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { and, desc, eq, lt, or, sql, type SQL } from 'drizzle-orm';
+import type { FastifyReply } from 'fastify';
 import type Redis from 'ioredis';
 import { z } from 'zod';
 import { AdminRoles } from '../../common/auth';
@@ -16,6 +17,7 @@ import { cursorQuery, IdParam } from '../admin/dto';
 import { FOUNDING_PRODUCT, RcProcessor } from './rc.processor';
 import { RevenueCatClient } from './revenuecat.client';
 import { env } from '../../config/env';
+import { toCsv } from '../users-admin/user-data.service';
 
 const Tabs = ['all', 'trial', 'annual', 'monthly', 'problem', 'cancelled'] as const;
 const MembersQuery = z.object({ tab: z.enum(Tabs).default('all'), ...cursorQuery });
@@ -65,14 +67,28 @@ export class SubscriptionsAdminService {
     };
   }
 
+  private tabConds(tab: (typeof Tabs)[number]): SQL[] {
+    const conds: SQL[] = [sql`${entitlements.productId} is not null`];
+    if (tab === 'trial') conds.push(live, eq(entitlements.periodType, 'trial'));
+    if (tab === 'annual') conds.push(live, sql`${entitlements.periodType} <> 'trial'`, sql`not ${isMonthly}`);
+    if (tab === 'monthly') conds.push(live, sql`${entitlements.periodType} <> 'trial'`, isMonthly);
+    if (tab === 'problem') conds.push(eq(entitlements.billingIssue, true));
+    if (tab === 'cancelled') conds.push(eq(entitlements.willRenew, false), sql`${entitlements.store} <> 'promotional'`);
+    return conds;
+  }
+
+  /** CSV of the members in one tab (max 100,000 rows), for the Subscriptions screen's export. */
+  async membersCsv(tab: (typeof Tabs)[number]) {
+    const rows = await this.db.select({
+      user_id: entitlements.userId, name: users.firstName, email: users.email, country: users.country, product: entitlements.productId, period: entitlements.periodType,
+      store: entitlements.store, started: entitlements.startedAt, expires: entitlements.expiresAt, will_renew: entitlements.willRenew, billing_issue: entitlements.billingIssue, founding: entitlements.isFounding,
+    }).from(entitlements).innerJoin(users, eq(users.id, entitlements.userId)).where(and(...this.tabConds(tab))).orderBy(desc(entitlements.updatedAt)).limit(100_000);
+    return toCsv(rows.map((r) => ({ ...r, started: r.started?.toISOString() ?? '', expires: r.expires?.toISOString() ?? '' })));
+  }
+
   async members(q: z.infer<typeof MembersQuery>) {
     const limit = clampLimit(q.limit, 30);
-    const conds: SQL[] = [sql`${entitlements.productId} is not null`];
-    if (q.tab === 'trial') conds.push(live, eq(entitlements.periodType, 'trial'));
-    if (q.tab === 'annual') conds.push(live, sql`${entitlements.periodType} <> 'trial'`, sql`not ${isMonthly}`);
-    if (q.tab === 'monthly') conds.push(live, sql`${entitlements.periodType} <> 'trial'`, isMonthly);
-    if (q.tab === 'problem') conds.push(eq(entitlements.billingIssue, true));
-    if (q.tab === 'cancelled') conds.push(eq(entitlements.willRenew, false), sql`${entitlements.store} <> 'promotional'`);
+    const conds = this.tabConds(q.tab);
     const c = decodeCursor(q.cursor);
     if (c) conds.push(or(lt(entitlements.updatedAt, new Date(String(c.k))), and(eq(entitlements.updatedAt, new Date(String(c.k))), lt(entitlements.userId, c.id)))!);
     const rows = await this.db.select({ e: entitlements, name: users.firstName, email: users.email, country: users.country }).from(entitlements)
@@ -133,6 +149,11 @@ export class SubscriptionsAdminController {
   constructor(private readonly subs: SubscriptionsAdminService) {}
 
   @AdminRoles(...CONTENT_ROLES) @Get('subscriptions/summary') summary() { return this.subs.summary(); }
+  @AdminRoles(...MANAGER_ROLES) @Get('subscriptions/members/export')
+  async export(@Query(new Zod(MembersQuery.pick({ tab: true }))) q: { tab: (typeof Tabs)[number] }, @Res() res: FastifyReply) {
+    const csv = await this.subs.membersCsv(q.tab);
+    void res.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="wehum-members-${q.tab}.csv"`).send(csv);
+  }
   @AdminRoles(...CONTENT_ROLES) @Get('subscriptions/members') members(@Query(new Zod(MembersQuery)) q: z.infer<typeof MembersQuery>) { return this.subs.members(q); }
   @AdminRoles(...CONTENT_ROLES) @Get('subscriptions/events') events(@Query(new Zod(EventsQuery)) q: z.infer<typeof EventsQuery>) { return this.subs.events(q); }
   @AdminRoles(...MANAGER_ROLES) @HttpCode(200) @Post('offers/founding/close') close(@CurrentActor() a: Actor) { return this.subs.closeFounding(a); }

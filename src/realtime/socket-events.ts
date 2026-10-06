@@ -67,6 +67,7 @@ export interface AdminServerToClient {
   'moderation:new': (p: { dedication: unknown; flags: string[] }) => void;
   'moderation:count': (p: { open: number }) => void;
   'subs:event': (p: { event: unknown }) => void;
+  'config:changed': (p: { key: string; version: number }) => void;
   'users:new': (p: { count: number }) => void;
   'job:progress': (p: { id: string; type: string; status: string; progress: number; error?: string; result?: unknown }) => void;
   'editing:presence': (p: { type: EntityType; id: string; admins: { id: string; name: string }[] }) => void;

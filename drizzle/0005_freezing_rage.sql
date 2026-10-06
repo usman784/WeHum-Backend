@@ -1,0 +1,1 @@
+ALTER TYPE "public"."audience" ADD VALUE 'founding';

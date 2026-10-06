@@ -10,7 +10,7 @@ import { ConfigService } from '../config/config.service';
 import { GroupService } from '../today/group.service';
 import { PushTransport } from './push.transport';
 
-export type Audience = 'all' | 'members' | 'free' | 'trial' | 'guests' | 'country';
+export type Audience = 'all' | 'members' | 'free' | 'trial' | 'guests' | 'country' | 'founding';
 export const QUIET_START = '22:00', QUIET_END = '07:00';
 const BATCH = 2000;
 
@@ -28,7 +28,7 @@ export function audienceWhere(a: Audience, countries: string[] = []): SQL {
   const base = sql`u.deleted_at is null and exists (select 1 from devices d where d.user_id = u.id and d.push_token is not null)`;
   const by: Record<Audience, SQL> = {
     all: sql`true`, members: sql`${member}`, free: sql`not coalesce(${member}, false)`, trial: sql`(${member} and e.period_type = 'trial')`,
-    guests: sql`u.is_guest`, country: countries.length ? sql`u.country in (${sql.join(countries.map((c) => sql`${c}`), sql`, `)})` : sql`false`,
+    guests: sql`u.is_guest`, founding: sql`(${member} and e.is_founding)`, country: countries.length ? sql`u.country in (${sql.join(countries.map((c) => sql`${c}`), sql`, `)})` : sql`false`,
   };
   return sql`${base} and ${by[a]}`;
 }

@@ -36,6 +36,13 @@
       "when": 1791302915464,
       "tag": "0004_polite_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791318602292,
+      "tag": "0005_freezing_rage",
+      "breakpoints": true
     }
   ]
 }

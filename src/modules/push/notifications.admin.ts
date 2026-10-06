@@ -14,7 +14,7 @@ import { AdminWriter, assertVersion, CurrentActor, etag, type Actor } from '../a
 import { cursorQuery, IdParam } from '../admin/dto';
 import { PushService, type Audience } from './push.service';
 
-const AUDIENCES = ['all', 'members', 'free', 'trial', 'guests', 'country'] as const;
+const AUDIENCES = ['all', 'members', 'free', 'trial', 'guests', 'country', 'founding'] as const;
 const Fields = {
   title: z.string().trim().min(1).max(50), body: z.string().trim().min(1).max(150), audience: z.enum(AUDIENCES).default('all'),
   countries: z.array(z.string().length(2).regex(/^[A-Z]{2}$/)).max(60).default([]), deepLink: z.string().trim().max(200).regex(/^(wehum:\/\/|https:\/\/)/, 'wehum:// or https://').nullable().optional(),
