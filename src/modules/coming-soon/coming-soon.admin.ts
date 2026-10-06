@@ -8,14 +8,14 @@ import { AdminRoles } from '../../common/auth';
 import { AppError } from '../../common/errors';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
 import { Zod } from '../../common/zod';
-import { breathPatterns, gratitudePosts, gratitudeReports, users } from '../../db/schema';
+import { breathPatterns, gratitudePosts, gratitudeReports, userMilestones, users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { RealtimeBus } from '../../infra/realtime-bus';
 import { CONTENT_ROLES, MANAGER_ROLES, MODERATION_ROLES } from '../admin-auth/rbac';
 import { AdminWriter, assertVersion, CurrentActor, etag, type Actor } from '../admin/admin-writer';
 import { ids } from '../admin/dto';
 import { GRATITUDE_REVIEW, postView } from './coming-soon.service';
-import { patternProblem } from './rules';
+import { MILESTONES, patternProblem } from './rules';
 
 const Queue = z.object({
   filter: z.enum(['review', 'flagged', 'hidden', 'all']).default('review'), kind: z.enum(['gratitude', 'affirmation', 'love']).optional(),
@@ -78,6 +78,13 @@ export class ComingSoonAdminService {
     });
   }
 
+  /** The 12 milestones and how many people reached each (CMS P9, read-only: milestones are automatic). */
+  async milestones() {
+    const counts = await this.db.select({ key: userMilestones.key, n: sql<number>`count(*)::int` }).from(userMilestones).groupBy(userMilestones.key);
+    const by = new Map(counts.map((c) => [c.key, c.n]));
+    return MILESTONES.map((m) => ({ key: m.key, label: m.label, badge: m.badge, metric: m.metric, target: m.target, reached: by.get(m.key) ?? 0 }));
+  }
+
   // ───────────── breath pattern templates (CMS P9)
   patterns() { return this.db.select().from(breathPatterns).orderBy(asc(breathPatterns.sort), asc(breathPatterns.name)); }
 
@@ -129,6 +136,8 @@ export class ComingSoonAdminController {
     }
     return { results };
   }
+
+  @AdminRoles(...CONTENT_ROLES) @Get('milestones') milestones() { return this.svc.milestones(); }
 
   @AdminRoles(...CONTENT_ROLES) @Get('breath-patterns') list() { return this.svc.patterns(); }
 

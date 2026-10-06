@@ -264,6 +264,9 @@ describe('P11 milestones', () => {
     expect(again.reachedAt).toBe(first); // stored, not recomputed
     expect(m.world.meditations).toBeGreaterThanOrEqual(7);
     expect(m.world.countries).toBeGreaterThanOrEqual(0);
+    const admin = (await as(editor).get('/v1/admin/milestones')).body.data;
+    expect(admin).toHaveLength(12);
+    expect(admin.find((x: { key: string }) => x.key === 'days7').reached).toBeGreaterThanOrEqual(1);
   });
 });
 
