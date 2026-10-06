@@ -33,7 +33,13 @@ export async function createApp(opts: { logger?: boolean } = {}) {
   const io = new RedisIoAdapter(app);
   await io.connectToRedis(env.REDIS_URL);
   app.useWebSocketAdapter(io);
-  app.enableCors({ origin: env.CMS_ORIGINS.split(',').map((s) => s.trim()), credentials: true });
+  // @fastify/cors allows only GET, HEAD and POST by default; the CMS also sends PUT, PATCH and DELETE.
+  app.enableCors({
+    origin: env.CMS_ORIGINS.split(',').map((s) => s.trim()),
+    credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    exposedHeaders: ['ETag', 'x-request-id', 'x-trace-id'],
+  });
   app.useGlobalInterceptors(new EnvelopeInterceptor());
   app.useGlobalFilters(new AppErrorFilter());
   app.getHttpAdapter().getInstance().addHook('onSend', async (req, reply) => { reply.header('x-request-id', String(req.id)); });
