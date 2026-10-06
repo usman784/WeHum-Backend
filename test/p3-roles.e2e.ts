@@ -5,6 +5,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_META } from '../src/common/auth';
+import { RevenueCatClient } from '../src/modules/subscriptions/revenuecat.client';
 import { adminToken, bootApp, guest, http, makeAdmin, resetTestDb, type AdminRole } from './helpers';
 
 const ROLES: AdminRole[] = ['owner', 'admin', 'editor', 'moderator'];
@@ -38,8 +39,10 @@ function adminRoutes(): AdminRoute[] {
 }
 
 beforeAll(async () => {
+  // no real network: RevenueCat answers 200 {} to everything
   await resetTestDb();
   app = await bootApp();
+  app.get(RevenueCatClient).fetchImpl = (async () => new Response('{}', { status: 200 })) as typeof fetch;
   db = new Client({ connectionString: process.env.DATABASE_URL }); await db.connect();
 });
 afterAll(async () => { await db?.end(); await app?.close(); });

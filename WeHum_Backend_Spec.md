@@ -1258,3 +1258,23 @@ Bugs found → fixed: the test "duplicate checksum…" built a "missing" id by r
 Decisions / deviations from spec: none.
 Open issues / risks: `p5-sockets.e2e.ts` failed in two full runs today (the 100-client group start, and once the admin handshake test) and passed in the runs before and after with no code change in that area. These tests are timing-sensitive when the machine is busy; if it shows up in CI they need longer waits.
 Status: ✅ done
+
+### Phase P6 — Subscriptions
+Date: 2026-10-06
+
+Built:
+- `POST /webhooks/revenuecat`: secret header (constant-time compare), event stored once (`ON CONFLICT (id) DO NOTHING`), job `rc.process` queued, answers at once. Migration `0004` adds `subscription_events.processed_at`.
+- `RcProcessor.process`: claims the event with `processed_at` (a retried job does nothing), maps the user (app user id, aliases; a stub guest is created when the purchase comes first; RevenueCat anonymous ids stay in the log only), ignores events older than `entitlements.last_event_at`, upserts the entitlement for INITIAL_PURCHASE / RENEWAL / UNCANCELLATION / PRODUCT_CHANGE / NON_RENEWING_PURCHASE / SUBSCRIPTION_EXTENDED / TEMPORARY_ENTITLEMENT_GRANT (grant), CANCELLATION / SUBSCRIPTION_PAUSED (stop renewing), BILLING_ISSUE, EXPIRATION, TRANSFER (old account loses access, new account is re-read from RevenueCat); TEST and unknown types are only logged. Then: bust `ent:{id}`, emit `entitlement:changed` and `subs:event`.
+- Founding counter on a new Founding purchase; the last slot sets `open=false` and switches the RevenueCat offering once.
+- `RevenueCatClient` (REST: subscriber read, promotional grant, offering switch); `POST /v1/me/entitlement/sync`; daily `rc.reconcile` job (scheduler).
+- Admin: `GET /v1/admin/subscriptions/summary | members | events` (owner, admin, editor), `POST /v1/admin/offers/founding/close` and `POST /v1/admin/users/:id/gift` (owner, admin; audited).
+
+Tests run: `npm test` → 239 passed (227 + 12 in `p6-subscriptions.e2e.ts`): secret, full lifecycle with cache bust and socket events, idempotency, out of order, stub user, transfer, founding cap (one offering switch), sync, reconcile, summary/members/events, gift, close. The role matrix test picks up the new routes.
+
+Decisions / deviations:
+- The founding slot is counted on INITIAL_PURCHASE only (a trial that converts is the same slot); spec text says "or trial conversion", which would count it twice.
+- MRR uses the latest USD price RevenueCat reported per product (monthly + annual ÷ 12, trials excluded). Plans show that price; the app never gets a price from us.
+- The inbox item for BILLING_ISSUE / EXPIRATION waits for the inbox in P8.
+- REST paths (`/v1/subscribers/{id}`, promotional grant, `v2/.../offerings/{key}` with `is_current`) follow RevenueCat's documentation but were only run against a fake; check them once against the RevenueCat sandbox before production. The dashboard ticker still shows its own MRR estimate from a price table; switching it to the summary's number is part of the dashboard work (P9).
+
+Status: ✅ done

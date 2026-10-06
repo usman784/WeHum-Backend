@@ -458,6 +458,8 @@ export const subscriptionEvents = pgTable('subscription_events', {
   store: varchar('store', { length: 20 }),
   eventAt: ts('event_at').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
+  /** Set once the processor has applied the event: a retried job must not count it twice (founding counter). */
+  processedAt: ts('processed_at'),
   raw: jsonb('raw').notNull(),
 }, (t) => [
   index('sub_events_at_idx').on(t.eventAt.desc()),

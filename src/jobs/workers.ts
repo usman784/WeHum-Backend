@@ -6,6 +6,7 @@ import { env } from '../config/env';
 import { GroupStartService } from '../realtime/group-start.service';
 import { CountersService } from '../modules/meditations/counters.service';
 import { StatsProcessor } from '../modules/meditations/stats.processor';
+import { RcProcessor } from '../modules/subscriptions/rc.processor';
 import { MediaProcessor } from './media.processor';
 import { PublishDueService } from './publish-due.service';
 import { bullConnection, QUEUES, QueueService } from './queues';
@@ -17,7 +18,7 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
   private workers: Worker[] = [];
   private conns: Redis[] = [];
 
-  constructor(private readonly media: MediaProcessor, private readonly publishDue: PublishDueService, private readonly stats: StatsProcessor, private readonly counters: CountersService, private readonly moduleRef: ModuleRef) {}
+  constructor(private readonly media: MediaProcessor, private readonly publishDue: PublishDueService, private readonly stats: StatsProcessor, private readonly counters: CountersService, private readonly moduleRef: ModuleRef, private readonly rc: RcProcessor) {}
 
   onModuleInit() { if (env.APP_ROLE === 'worker') this.start(); }
 
@@ -30,6 +31,8 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
       new Worker(QUEUES.cron, async (job) => {
         if (job.name === 'catalog.publishDue') return this.publishDue.run();
         if (job.name === 'counters.flush') return this.counters.flush();
+        if (job.name === 'rc.process') return this.rc.process(job.data.eventId);
+        if (job.name === 'rc.reconcile') return this.rc.reconcile();
         // resolved lazily: the realtime module imports this one
         if (job.name === 'group.start') return this.moduleRef.get(GroupStartService, { strict: false }).fire(job.data.date, job.data.startsAt);
         this.log.warn(`unknown cron job ${job.name}`);

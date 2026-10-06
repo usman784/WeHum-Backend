@@ -6,6 +6,7 @@ import { GatewaysModule, RealtimeCoreModule } from './realtime/realtime.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ActivityModule } from './modules/activity.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { ContentModule } from './modules/catalog/content.module';
 
 /** One codebase, three roles (spec §3). Feature modules are added per phase. */
@@ -13,7 +14,7 @@ import { ContentModule } from './modules/catalog/content.module';
 export class AppModule {
   static forRole(role: 'api' | 'worker' | 'scheduler'): DynamicModule {
     if (role === 'api') {
-      return { module: AppModule, imports: [CoreModule, AuthModule, ContentModule, AdminModule, ActivityModule, JobsModule, GatewaysModule], controllers: [HealthController] };
+      return { module: AppModule, imports: [CoreModule, AuthModule, ContentModule, AdminModule, ActivityModule, JobsModule, GatewaysModule, SubscriptionsModule], controllers: [HealthController] };
     }
     return { module: AppModule, imports: [CoreModule, JobsModule, RealtimeCoreModule] };
   }

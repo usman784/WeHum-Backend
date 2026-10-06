@@ -1,0 +1,1 @@
+ALTER TABLE "subscription_events" ADD COLUMN "processed_at" timestamp (3) with time zone;

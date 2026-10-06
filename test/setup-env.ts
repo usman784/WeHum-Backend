@@ -22,3 +22,6 @@ process.env.FFPROBE_PATH = process.env.FFPROBE_PATH ?? require('@ffprobe-install
   process.env.JWT_PUBLIC_KEYS_B64 = Buffer.from(JSON.stringify([{ kid: 'test', pem: createPublicKey(priv).export({ type: 'spki', format: 'pem' }) }])).toString('base64');
   process.env.JWT_KID = 'test';
 }
+process.env.REVENUECAT_WEBHOOK_SECRET = 'rc-test-secret';
+process.env.REVENUECAT_API_KEY_V2 = 'rc-test-key';
+process.env.REVENUECAT_PROJECT_ID = 'proj-test';

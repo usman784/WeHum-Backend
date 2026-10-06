@@ -29,6 +29,11 @@ const schema = z.object({
   SMTP_URL: z.string().default(''),
   APP_LINK_BASE: z.string().default('https://wehum.app'),
   REVENUECAT_WEBHOOK_SECRET: z.string().default(''),
+  REVENUECAT_API_KEY_V2: z.string().default(''),
+  REVENUECAT_PROJECT_ID: z.string().default(''),
+  /** Offering the app gets once the Founding offer is closed. */
+  REVENUECAT_REGULAR_OFFERING: z.string().default('regular'),
+  REVENUECAT_BASE_URL: z.string().default('https://api.revenuecat.com'),
   ADMIN_APP_URL: z.string().default('http://localhost:5173'),
   S3_ENDPOINT: z.string().default(''),
   S3_REGION: z.string().default('eu-central-1'),
