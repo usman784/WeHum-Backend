@@ -24,7 +24,7 @@ echo "▶ copying to the server"
 rsync -az --delete -e "$RSYNC_SSH" --exclude node_modules --exclude dist --exclude .env --exclude test-results --exclude .git \
   "$ROOT/backend/" "root@$HOST:/opt/wehum/backend/"
 rsync -az --delete -e "$RSYNC_SSH" "$ROOT/cms/dist/" "root@$HOST:/opt/wehum/cms/"
-rsync -az -e "$RSYNC_SSH" "$HERE/docker-compose.yml" "$HERE/env.template" "$HERE/remote.sh" "$HERE/nginx" "root@$HOST:/opt/wehum/"
+rsync -az -e "$RSYNC_SSH" "$HERE/docker-compose.yml" "$HERE/env.template" "$HERE/remote.sh" "$HERE/nginx" "$HERE/img" "root@$HOST:/opt/wehum/"
 
 echo "▶ server setup, build and start"
 "${SSH[@]}" "CMS_HOST='$CMS_HOST' API_HOST='$API_HOST' COOKIE_DOMAIN='$COOKIE_DOMAIN' bash /opt/wehum/remote.sh"
