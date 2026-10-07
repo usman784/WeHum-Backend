@@ -37,6 +37,8 @@ const schema = z.object({
   REVENUECAT_BASE_URL: z.string().default('https://api.revenuecat.com'),
   ADMIN_APP_URL: z.string().default('http://localhost:5173'),
   S3_ENDPOINT: z.string().default(''),
+  /** Endpoint in the URLs given to browsers, when storage is reached differently from outside (a proxy). */
+  S3_PUBLIC_ENDPOINT: z.string().default(''),
   S3_REGION: z.string().default('eu-central-1'),
   S3_BUCKET: z.string().default('wehum-media-dev'),
   S3_ACCESS_KEY: z.string().default(''),

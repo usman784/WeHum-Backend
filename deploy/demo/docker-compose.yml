@@ -1,0 +1,42 @@
+# WeHum demo / staging server: the whole stack on one VPS (backend + CMS), HTTPS by Caddy (Let's Encrypt).
+# Lives in /opt/wehum on the server; see deploy/demo/README.md. Secrets are in /opt/wehum/.env (never committed).
+name: wehum
+x-app: &app
+  image: wehum-backend:latest
+  build: { context: ./backend, dockerfile: docker/Dockerfile }
+  env_file: [.env]
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_started }
+    minio: { condition: service_started }
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: wehum, POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: wehum }
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "log_min_duration_statement=200"]
+    volumes: ["pg:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U wehum"], interval: 5s, retries: 20 }
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: ["redis:/data"]
+    restart: unless-stopped
+  minio:
+    # the official image is no longer on Docker Hub; same image as local dev (docker-compose.yml)
+    image: bitnamilegacy/minio:latest
+    environment: { MINIO_ROOT_USER: "${S3_ACCESS_KEY}", MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY}", MINIO_DEFAULT_BUCKETS: "wehum-media:download" }
+    volumes: ["minio:/bitnami/minio/data"]
+    restart: unless-stopped
+  api: { <<: *app, environment: { APP_ROLE: api, PORT: "3000" } }
+  worker: { <<: *app, environment: { APP_ROLE: worker } }
+  scheduler: { <<: *app, environment: { APP_ROLE: scheduler } }
+  caddy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443", "9443:9443"]
+    environment: { SITE_HOST: "${SITE_HOST}" }
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "./cms:/srv/cms:ro", "caddy:/data"]
+    depends_on: [api, minio]
+    restart: unless-stopped
+volumes: { pg: {}, redis: {}, minio: {}, caddy: {} }

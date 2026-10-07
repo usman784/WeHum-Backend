@@ -14,12 +14,18 @@ import { env } from '../config/env';
 @Injectable()
 export class S3Service {
   readonly bucket = env.S3_BUCKET;
-  private readonly client = new S3Client({
-    region: env.S3_REGION,
-    ...(env.S3_ENDPOINT && { endpoint: env.S3_ENDPOINT }),
-    forcePathStyle: env.S3_FORCE_PATH_STYLE,
-    ...(env.S3_ACCESS_KEY && { credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY } }),
-  });
+  private readonly client = S3Service.make(env.S3_ENDPOINT);
+  /** Signs the URLs the browser uses. Same as `client` unless S3_PUBLIC_ENDPOINT is set (storage behind a proxy). */
+  private readonly signer = env.S3_PUBLIC_ENDPOINT ? S3Service.make(env.S3_PUBLIC_ENDPOINT) : this.client;
+
+  private static make(endpoint: string) {
+    return new S3Client({
+      region: env.S3_REGION,
+      ...(endpoint && { endpoint }),
+      forcePathStyle: env.S3_FORCE_PATH_STYLE,
+      ...(env.S3_ACCESS_KEY && { credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY } }),
+    });
+  }
 
   /** Dev/test convenience; production buckets are created by infrastructure. */
   async ensureBucket() {
@@ -33,7 +39,7 @@ export class S3Service {
   }
 
   presignPart(key: string, uploadId: string, partNumber: number, ttlSec = 3600) {
-    return getSignedUrl(this.client, new UploadPartCommand({ Bucket: this.bucket, Key: key, UploadId: uploadId, PartNumber: partNumber }), { expiresIn: ttlSec });
+    return getSignedUrl(this.signer, new UploadPartCommand({ Bucket: this.bucket, Key: key, UploadId: uploadId, PartNumber: partNumber }), { expiresIn: ttlSec });
   }
 
   async completeMultipart(key: string, uploadId: string, parts: { partNumber: number; etag: string }[]) {
@@ -74,7 +80,7 @@ export class S3Service {
 
   /** A link that works for `ttlSec` (user data exports). */
   presignGet(key: string, ttlSec = 86_400) {
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: ttlSec });
+    return getSignedUrl(this.signer, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: ttlSec });
   }
 
   /** Every key under a prefix (a user's exports). */
