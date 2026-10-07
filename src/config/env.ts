@@ -36,6 +36,8 @@ const schema = z.object({
   REVENUECAT_REGULAR_OFFERING: z.string().default('regular'),
   REVENUECAT_BASE_URL: z.string().default('https://api.revenuecat.com'),
   ADMIN_APP_URL: z.string().default('http://localhost:5173'),
+  /** Parent domain for the readable CSRF cookie when the CMS and API are on different subdomains, e.g. ".wehum.app". */
+  ADMIN_COOKIE_DOMAIN: z.string().default(''),
   S3_ENDPOINT: z.string().default(''),
   /** Endpoint in the URLs given to browsers, when storage is reached differently from outside (a proxy). */
   S3_PUBLIC_ENDPOINT: z.string().default(''),

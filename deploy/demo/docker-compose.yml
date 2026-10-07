@@ -35,7 +35,7 @@ services:
   caddy:
     image: caddy:2-alpine
     ports: ["80:80", "443:443", "9443:9443"]
-    environment: { SITE_HOST: "${SITE_HOST}" }
+    environment: { CMS_HOST: "${CMS_HOST}", API_HOST: "${API_HOST}" }
     volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "./cms:/srv/cms:ro", "caddy:/data"]
     depends_on: [api, minio]
     restart: unless-stopped

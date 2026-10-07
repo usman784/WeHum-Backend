@@ -1,6 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { env } from '../src/config/env';
 import { Mailer } from '../src/infra/mailer';
 import { ADMIN_PASSWORD, adminToken, bootApp, cookiesOf, http, makeAdmin, resetTestDb, totp } from './helpers';
 
@@ -152,8 +153,18 @@ describe('P3 admin refresh cookie + CSRF', () => {
     const again = await h().post('/v1/admin/auth/refresh', {}, { headers: { cookie, 'x-csrf': s.cookies.wh_csrf!.value } });
     expect(again.status).toBe(401);
     expect(again.body.error.code).toBe('TOKEN_INVALID');
-    // the rotated cookie keeps working
-    expect((await h().post('/v1/admin/auth/refresh', {}, { headers: { cookie: cookieHeader(c2), 'x-csrf': c2.wh_csrf!.value } })).status).toBe(200);
+    // the rotated cookie keeps working; by default the CSRF cookie is host-only
+    expect(c2.wh_csrf!.flags).not.toMatch(/domain=/);
+    env.ADMIN_COOKIE_DOMAIN = '.wehum.test'; // CMS and API on different subdomains
+    try {
+      const sub = await h().post('/v1/admin/auth/refresh', {}, { headers: { cookie: cookieHeader(c2), 'x-csrf': c2.wh_csrf!.value } });
+      expect(sub.status).toBe(200);
+      const c3 = cookiesOf(sub.headers);
+      expect(c3.wh_csrf!.flags).toMatch(/domain=\.wehum\.test/); // readable by cms.wehum.test
+      expect(c3.wh_rt!.flags).not.toMatch(/domain=/); // the refresh cookie stays on the API host
+    } finally {
+      env.ADMIN_COOKIE_DOMAIN = '';
+    }
   });
 
   it('12 h idle timeout and 7 d absolute limit', async () => {

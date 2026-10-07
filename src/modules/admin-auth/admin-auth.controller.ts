@@ -24,6 +24,12 @@ const ResetDto = z.object({ token: z.string().min(20), password: adminPassword }
 const InviteDto = z.object({ token: z.string().min(20), name: z.string().trim().min(1).max(80), password: adminPassword });
 
 const RT = 'wh_rt', CSRF = 'wh_csrf';
+/**
+ * The CMS reads `wh_csrf` and echoes it in `X-CSRF`. With the CMS and the API on different subdomains
+ * (cms.wehum.app → api.wehum.app) the cookie must belong to the parent domain, or the CMS cannot read it.
+ * The refresh cookie stays host-only on the API: only the API ever needs it.
+ */
+export const csrfDomain = () => (env.ADMIN_COOKIE_DOMAIN ? { domain: env.ADMIN_COOKIE_DOMAIN } : {});
 const ctx = (req: FastifyRequest): Ctx => ({ ip: req.ip, userAgent: req.headers['user-agent'] });
 
 const safeEq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -86,13 +92,14 @@ export class AdminAuthController {
     const { refreshToken, refreshExpiresAt, ...body } = s;
     const base = { secure: isProd || env.NODE_ENV === 'test', sameSite: 'strict' as const, expires: refreshExpiresAt };
     res.setCookie(RT, refreshToken, { ...base, httpOnly: true, path: '/v1/admin/auth' });
-    res.setCookie(CSRF, body.csrfToken, { ...base, httpOnly: false, path: '/' });
+    res.setCookie(CSRF, body.csrfToken, { ...base, httpOnly: false, path: '/', ...csrfDomain() });
     res.header('cache-control', 'no-store');
     return body;
   }
 
   private clearCookies(res: FastifyReply) {
     res.clearCookie(RT, { path: '/v1/admin/auth' });
-    res.clearCookie(CSRF, { path: '/' });
+    res.clearCookie(CSRF, { path: '/', ...csrfDomain() });
+    if (env.ADMIN_COOKIE_DOMAIN) res.clearCookie(CSRF, { path: '/' }); // an older host-only copy
   }
 }
