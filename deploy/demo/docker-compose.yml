@@ -1,4 +1,5 @@
-# WeHum demo / staging server: the whole stack on one VPS (backend + CMS), HTTPS by Caddy (Let's Encrypt).
+# WeHum demo / staging server: the backend stack on one VPS. The host's nginx (shared with other sites) serves the CMS
+# files and proxies to these containers, which listen on 127.0.0.1 only; certificates by certbot.
 # Lives in /opt/wehum on the server; see deploy/demo/README.md. Secrets are in /opt/wehum/.env (never committed).
 name: wehum
 x-app: &app
@@ -28,15 +29,9 @@ services:
     image: bitnamilegacy/minio:latest
     environment: { MINIO_ROOT_USER: "${S3_ACCESS_KEY}", MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY}", MINIO_DEFAULT_BUCKETS: "wehum-media:download" }
     volumes: ["minio:/bitnami/minio/data"]
+    ports: ["127.0.0.1:9100:9000"]
     restart: unless-stopped
-  api: { <<: *app, environment: { APP_ROLE: api, PORT: "3000" } }
+  api: { <<: *app, environment: { APP_ROLE: api, PORT: "3000" }, ports: ["127.0.0.1:3100:3000"] }
   worker: { <<: *app, environment: { APP_ROLE: worker } }
   scheduler: { <<: *app, environment: { APP_ROLE: scheduler } }
-  caddy:
-    image: caddy:2-alpine
-    ports: ["80:80", "443:443", "9443:9443"]
-    environment: { CMS_HOST: "${CMS_HOST}", API_HOST: "${API_HOST}" }
-    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "./cms:/srv/cms:ro", "caddy:/data"]
-    depends_on: [api, minio]
-    restart: unless-stopped
-volumes: { pg: {}, redis: {}, minio: {}, caddy: {} }
+volumes: { pg: {}, redis: {}, minio: {} }

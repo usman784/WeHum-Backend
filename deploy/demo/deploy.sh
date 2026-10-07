@@ -24,7 +24,7 @@ echo "▶ copying to the server"
 rsync -az --delete -e "$RSYNC_SSH" --exclude node_modules --exclude dist --exclude .env --exclude test-results --exclude .git \
   "$ROOT/backend/" "root@$HOST:/opt/wehum/backend/"
 rsync -az --delete -e "$RSYNC_SSH" "$ROOT/cms/dist/" "root@$HOST:/opt/wehum/cms/"
-rsync -az -e "$RSYNC_SSH" "$HERE/docker-compose.yml" "$HERE/Caddyfile" "$HERE/env.template" "root@$HOST:/opt/wehum/"
+rsync -az -e "$RSYNC_SSH" "$HERE/docker-compose.yml" "$HERE/env.template" "$HERE/nginx" "root@$HOST:/opt/wehum/"
 
 echo "▶ server setup, build and start"
 "${SSH[@]}" "CMS_HOST='$CMS_HOST' API_HOST='$API_HOST' COOKIE_DOMAIN='$COOKIE_DOMAIN' bash -s" <<'REMOTE'
@@ -61,6 +61,18 @@ docker compose run --rm -T api node dist/db/migrate.js
 docker compose run --rm -T api node dist/db/seed.js
 docker compose run --rm -T api node dist/db/seed-demo.js
 docker compose up -d
+
+# ── host nginx (shared with other sites on this server: only the wehum-* files are written)
+site() { sed -e "s/__CMS_HOST__/$CMS_HOST/g" -e "s/__API_HOST__/$API_HOST/g" "nginx/$1.conf" > "/etc/nginx/sites-available/$1"; ln -sf "/etc/nginx/sites-available/$1" "/etc/nginx/sites-enabled/$1"; }
+if [ ! -d "/etc/letsencrypt/live/$CMS_HOST" ] || [ ! -d "/etc/letsencrypt/live/$API_HOST" ]; then
+  site wehum-cms; site wehum-api
+  nginx -t && systemctl reload nginx
+  certbot --nginx --non-interactive --agree-tos --register-unsafely-without-email --redirect -d "$CMS_HOST" -d "$API_HOST" --cert-name "$API_HOST" >/dev/null
+  # certbot put both names on one certificate; give the CMS name its own path too, so the files below are simple
+  [ -d "/etc/letsencrypt/live/$CMS_HOST" ] || ln -s "/etc/letsencrypt/live/$API_HOST" "/etc/letsencrypt/live/$CMS_HOST"
+fi
+site wehum-storage
+nginx -t && systemctl reload nginx
 sleep 5
 docker compose ps --format 'table {{.Service}}\t{{.Status}}'
 echo "  owner: raphael@wehum.app / $(cat owner-password.txt 2>/dev/null || echo '(see /opt/wehum/owner-password.txt)')"
