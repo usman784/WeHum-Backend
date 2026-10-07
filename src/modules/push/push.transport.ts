@@ -3,6 +3,9 @@ import { importPKCS8, SignJWT } from 'jose';
 import { env } from '../../config/env';
 
 export interface PushMessage { token: string; title: string; body: string; data: Record<string, string> }
+export type TopicOp = 'subscribe' | 'unsubscribe';
+/** Each user has one FCM topic; every device of theirs is subscribed while it is signed in. */
+export const userTopic = (userId: string) => `user_${userId}`;
 export type PushResult = { token: string; status: 'ok' | 'invalid' | 'failed' };
 
 /**
@@ -16,7 +19,34 @@ export class PushTransport {
   /** Replaced in tests. */
   impl: (messages: PushMessage[]) => Promise<PushResult[]> = (m) => this.sendFcm(m);
 
+  /** Replaced in tests. Best effort: never throws, returns false when FCM said no. */
+  topicImpl: (op: TopicOp, topic: string, tokens: string[]) => Promise<boolean> = (op, topic, tokens) => this.topicFcm(op, topic, tokens);
+
   send(messages: PushMessage[]) { return this.impl(messages); }
+  subscribe(userId: string, tokens: string[]) { return this.topic('subscribe', userId, tokens); }
+  unsubscribe(userId: string, tokens: string[]) { return this.topic('unsubscribe', userId, tokens); }
+
+  private async topic(op: TopicOp, userId: string, tokens: string[]) {
+    const list = [...new Set(tokens.filter(Boolean))];
+    if (!list.length) return true;
+    let ok = true;
+    for (let i = 0; i < list.length; i += 1000) ok = (await this.topicImpl(op, userTopic(userId), list.slice(i, i + 1000))) && ok;
+    return ok;
+  }
+
+  private async topicFcm(op: TopicOp, topic: string, tokens: string[]): Promise<boolean> {
+    const sa = this.account();
+    if (!sa) return false;
+    try {
+      const access = await this.accessToken(sa);
+      const res = await fetch(`https://iid.googleapis.com/iid/v1:${op === 'subscribe' ? 'batchAdd' : 'batchRemove'}`, {
+        method: 'POST', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json', access_token_auth: 'true' }, signal: AbortSignal.timeout(10_000),
+        body: JSON.stringify({ to: `/topics/${topic}`, registration_tokens: tokens }),
+      });
+      if (!res.ok) this.log.warn(`Topic ${op} ${res.status}`);
+      return res.ok;
+    } catch (e) { this.log.warn(`Topic ${op} failed: ${(e as Error).message}`); return false; }
+  }
 
   private account() {
     if (!env.FCM_SERVICE_ACCOUNT_JSON) return null;

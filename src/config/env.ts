@@ -25,6 +25,8 @@ const schema = z.object({
   MIN_APP_VERSION_ANDROID: z.string().default('1.0.0'),
   APPLE_BUNDLE_IDS: z.string().default('app.wehum.meditation'),
   GOOGLE_CLIENT_IDS: z.string().default(''),
+  /** Firebase Auth: the app signs in with Firebase (Google/Apple) and sends the Firebase id token. */
+  FIREBASE_PROJECT_ID: z.string().default('wehum-a7fc5'),
   MAIL_FROM: z.string().default('WeHum <hello@wehum.app>'),
   SMTP_URL: z.string().default(''),
   APP_LINK_BASE: z.string().default('https://wehum.app'),

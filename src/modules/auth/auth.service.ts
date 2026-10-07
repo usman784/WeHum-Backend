@@ -14,6 +14,7 @@ import { DRIZZLE, type DB } from '../../infra/core.module';
 import { Mailer } from '../../infra/mailer';
 import { K, REDIS } from '../../infra/redis';
 import { toMe } from '../me/me.mapper';
+import { PushTransport } from '../push/push.transport';
 import { SocialVerifier } from './social.verifier';
 import { opaqueToken, sha256, TokensService } from './tokens.service';
 
@@ -31,6 +32,7 @@ export class AuthService {
     private readonly tokens: TokensService,
     private readonly social: SocialVerifier,
     private readonly mailer: Mailer,
+    private readonly push: PushTransport,
   ) {}
 
   // ───────────── sessions ─────────────
@@ -98,8 +100,10 @@ export class AuthService {
   async logout(user: AppUser, refreshToken?: string) {
     if (refreshToken) await this.tokens.revokeFamilyOf(refreshToken);
     if (user.installId) {
+      const [old] = await this.db.select({ token: devices.pushToken }).from(devices).where(and(eq(devices.installId, user.installId), eq(devices.userId, user.id)));
       const [dev] = await this.db.update(devices).set({ pushToken: null }).where(and(eq(devices.installId, user.installId), eq(devices.userId, user.id))).returning({ id: devices.id });
       if (dev) await this.tokens.revokeDevice(user.id, dev.id);
+      if (old?.token) await this.push.unsubscribe(user.id, [old.token]); // leave topic user_<id> on logout
     }
   }
 
@@ -285,6 +289,7 @@ export class AuthService {
     if (!guestId) throw new AppError('TOKEN_INVALID', 'Merge link expired');
     if (guestId === account.id) return { merged: false };
     const a = account.id;
+    const guestTokens = (await this.db.select({ t: devices.pushToken }).from(devices).where(eq(devices.userId, guestId))).flatMap((d) => (d.t ? [d.t] : []));
     const moved = await this.db.transaction(async (tx) => {
       const [g] = await tx.select().from(users).where(eq(users.id, guestId)).for('update');
       if (!g || !g.isGuest) throw new AppError('INVALID_STATE', 'Nothing to merge');
@@ -316,6 +321,8 @@ export class AuthService {
       return m.length;
     });
     await this.redis.set(K.tokenVersion(guestId), -1, 'EX', 86400);
+    await this.push.unsubscribe(guestId, guestTokens);
+    await this.push.subscribe(account.id, guestTokens);
     return { merged: true, meditationsMoved: moved };
   }
 }

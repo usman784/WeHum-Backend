@@ -12,6 +12,7 @@ import { devices, inboxItems } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { REDIS } from '../../infra/redis';
 import { GroupService } from '../today/group.service';
+import { PushTransport } from './push.transport';
 
 const DeviceDto = z.object({
   installId: z.string().min(8).max(64), platform: z.enum(['ios', 'android']), pushToken: z.string().min(10).max(512).nullable().optional(),
@@ -25,22 +26,28 @@ const Id = new Zod(z.string().uuid());
 @ApiBearerAuth()
 @Controller('v1')
 export class PushController {
-  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly group: GroupService) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly group: GroupService, private readonly transport: PushTransport) {}
 
   /** Register or update this phone and its push token. A token belongs to one device: an older owner loses it. */
   @Post('me/devices')
   async register(@CurrentUser() u: AppUser, @Body(new Zod(DeviceDto)) b: z.infer<typeof DeviceDto>) {
+    const [prev] = await this.db.select({ userId: devices.userId, token: devices.pushToken }).from(devices).where(eq(devices.installId, b.installId));
     if (b.pushToken) await this.db.update(devices).set({ pushToken: null }).where(and(eq(devices.pushToken, b.pushToken), sql`${devices.installId} <> ${b.installId}`));
     const [row] = await this.db.insert(devices).values({ id: uuidv7(), userId: u.id, installId: b.installId, platform: b.platform, pushToken: b.pushToken ?? null, appVersion: b.appVersion, osVersion: b.osVersion, model: b.model })
       .onConflictDoUpdate({ target: devices.installId, set: { userId: u.id, platform: b.platform, appVersion: b.appVersion, osVersion: b.osVersion, model: b.model, lastSeenAt: new Date(), ...(b.pushToken !== undefined && { pushToken: b.pushToken }) } })
       .returning({ id: devices.id });
+    // topic user_<id>: leave the old owner's / old token's topic, join this user's
+    if (prev?.token && (prev.userId !== u.id || prev.token !== b.pushToken) && b.pushToken !== undefined) await this.transport.unsubscribe(prev.userId, [prev.token]);
+    if (b.pushToken) await this.transport.subscribe(u.id, [b.pushToken]);
     return { id: row!.id, pushEnabled: !!b.pushToken };
   }
 
   @HttpCode(204) @Delete('me/devices/:id')
   async unregister(@CurrentUser() u: AppUser, @Param('id', Id) id: string) {
+    const [old] = await this.db.select({ token: devices.pushToken }).from(devices).where(and(eq(devices.id, id), eq(devices.userId, u.id)));
     const r = await this.db.update(devices).set({ pushToken: null }).where(and(eq(devices.id, id), eq(devices.userId, u.id))).returning({ id: devices.id });
     if (!r.length) throw new AppError('NOT_FOUND', 'Device not found');
+    if (old?.token) await this.transport.unsubscribe(u.id, [old.token]);
   }
 
   @Get('me/inbox')
