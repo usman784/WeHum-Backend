@@ -35,6 +35,8 @@ docker compose run --rm -T api node dist/db/seed.js </dev/null
 docker compose run --rm -T api node dist/db/seed-demo.js </dev/null
 # cover images the seed points at (img/<name>.jpg)
 docker compose run --rm -T -v /opt/wehum/img:/img:ro api node dist/db/seed-images.js /img </dev/null
+# placeholder audio for the seeded media rows, so players, downloads and Build your own work on the demo
+docker compose run --rm -T api node dist/db/seed-media.js </dev/null
 docker compose up -d
 
 # ── host nginx (shared with other sites on this server: only the wehum-* files are written)

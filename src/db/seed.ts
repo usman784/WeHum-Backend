@@ -102,7 +102,7 @@ export async function seed(url?: string) {
         const dur = [10, 20, 30][k]! * 60;
         const id = uuid(); sessionIds.push(id);
         await db.insert(s.sessions).values({
-          id, slug: slug(title), title, description: `A guided ${THEMES[ti]![1].toLowerCase()} meditation with Raphael.`,
+          id, slug: slug(title), title, description: `A guided ${THEMES[ti]![1].toLowerCase().replace(/ meditation$/, '')} meditation with Raphael.`,
           type: k === 2 && ti % 3 === 0 ? 'video' : 'audio', access: 'premium', themeId, teacherId: raphael, tags: [THEMES[ti]![0]],
           durationSec: dur, mediaId: await media('audio', title, dur), coverUrl: `img/${IMAGES[n % IMAGES.length]}.jpg`, status: 'live', publishAt: new Date(),
         });
