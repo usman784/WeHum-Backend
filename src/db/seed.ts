@@ -109,10 +109,17 @@ export async function seed(url?: string) {
       }
     }
     // Free for you (online library, YouTube-hosted — never labelled "YouTube" in the app)
-    for (const [i, title] of ['Ten Minutes of Calm', 'Breath of Relief', 'Morning Reset', 'Body at Ease'].entries()) {
+    // real, embeddable videos from Raphael Reiter's channel (id, seconds): a made-up id shows "Not available" in the app
+    const FREE: [string, string, number][] = [
+      ['Embracing the Depths of Self Love', 'bp-2_tAO3NY', 828],
+      ['Deep Transcendent Meditation', 'lsb11nDfavE', 1545],
+      ['Self Transcendence', '9rEj9Qa760s', 1531],
+      ['Guided Meditation for Transcendence', 'MCLjLjqtRaA', 1846],
+    ];
+    for (const [i, [title, youtubeId, durationSec]] of FREE.entries()) {
       await db.insert(s.sessions).values({
         id: uuid(), slug: slug(title), title, type: 'youtube', access: 'free', themeId: themeIds[i * 2], teacherId: raphael,
-        durationSec: (10 + i * 5) * 60, youtubeId: `seedYT0000${i}`, coverUrl: `img/${IMAGES[(i + 3) % IMAGES.length]}.jpg`, status: 'live', publishAt: new Date(),
+        durationSec, youtubeId, coverUrl: `img/${IMAGES[(i + 3) % IMAGES.length]}.jpg`, status: 'live', publishAt: new Date(),
       });
     }
     for (const [i, [feeling, sub, min]] of SOS.entries()) {

@@ -273,7 +273,7 @@ describe('P2 play-url (signed, premium-gated)', () => {
   it('free library item plays for everyone as a YouTube id (no URL, no download)', async () => {
     const id = await freeSession();
     const r = await play(free.accessToken, { kind: 'session', id });
-    expect(r.body.data).toMatchObject({ type: 'youtube', url: null, youtubeId: expect.stringMatching(/^seedYT/) });
+    expect(r.body.data).toMatchObject({ type: 'youtube', url: null, youtubeId: expect.stringMatching(/^[\w-]{11}$/) });
     expect((await play(free.accessToken, { kind: 'session', id, download: true })).body.error.code).toBe('INVALID_STATE');
   });
 
