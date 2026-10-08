@@ -6,7 +6,7 @@ import { K, REDIS } from '../../infra/redis';
 import { appConfig } from '../../db/schema';
 import { CONFIG_DEFAULTS } from '../../db/config-defaults';
 
-export interface MainConfig { minVersion: { ios: string; android: string }; maintenance: boolean; features: Record<string, boolean>; supportEmail: string; defaultReminderTime: string; languages: string[] }
+export interface MainConfig { minVersion: { ios: string; android: string }; latestVersion?: { ios: string; android: string }; storeUrls?: { ios: string; android: string }; maintenance: boolean; features: Record<string, boolean>; supportEmail: string; defaultReminderTime: string; languages: string[] }
 export interface TodayConfig { emptyRoomThreshold: number; freeHomePick: 'random' | 'newest'; showDailyMessage: boolean; sections: Record<string, boolean> }
 export interface GroupConfig { startUtc: string; lengthMin: number; lobbyOpenMin: number; reminderMin: number }
 

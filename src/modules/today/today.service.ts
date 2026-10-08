@@ -49,10 +49,20 @@ export class TodayService {
       this.founding(), this.catalog.version(),
     ]);
     const min = headers.platform === 'ios' || headers.platform === 'android' ? main.value.minVersion[headers.platform] : undefined;
+    const plat = headers.platform === 'ios' || headers.platform === 'android' ? headers.platform : undefined;
+    const latest = plat ? main.value.latestVersion?.[plat] : undefined;
+    const required = !!(min && headers.version && compareVersions(headers.version, min) < 0);
+    const update = {
+      required,
+      available: !required && !!(latest && headers.version && compareVersions(headers.version, latest) < 0),
+      latest: latest ?? null,
+      storeUrl: (plat && main.value.storeUrls?.[plat]) || null,
+    };
     const { entitlement, createdAt: _c, email: _e, providers: _p, locale: _l, dailyMessagePush: _d, ...profile } = me;
     void _c; void _e; void _p; void _l; void _d;
     const body = {
-      updateRequired: !!(min && headers.version && compareVersions(headers.version, min) < 0),
+      updateRequired: required,
+      update,
       maintenance: main.value.maintenance,
       me: profile, entitlement,
       features: main.value.features,

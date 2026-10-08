@@ -22,6 +22,9 @@ const flag = z.boolean();
 export const CONFIG_SCHEMAS = {
   main: z.object({
     minVersion: z.object({ ios: semver, android: semver }).strict(), maintenance: flag,
+    /** Newest release per store: older apps get a dismissible "update available" prompt (below `minVersion`, which blocks). */
+    latestVersion: z.object({ ios: semver, android: semver }).strict().optional(),
+    storeUrls: z.object({ ios: z.string().url().max(300).or(z.literal('')), android: z.string().url().max(300).or(z.literal('')) }).strict().optional(),
     features: z.object({ challenges: flag, gratitude: flag, breathwork: flag, milestones: flag, intent: flag }).strict(),
     supportEmail: z.string().email(), defaultReminderTime: hhmm, languages: z.array(z.string().max(10)).min(1).max(20),
   }).strict(),

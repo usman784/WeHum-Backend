@@ -104,6 +104,19 @@ describe('P4 GET /v1/bootstrap', () => {
     await setConfig('main', { minVersion: { ios: '1.0.0', android: '1.0.0' } });
   });
 
+  it('update prompt: below latestVersion but above minVersion → available (dismissible) with the store link; below min → required', async () => {
+    const g = await guest(app);
+    await setConfig('main', { latestVersion: { ios: '1.5.0', android: '1.5.0' }, storeUrls: { ios: 'https://apps.apple.com/app/id1', android: 'https://play.google.com/store/apps/details?id=app.wehum.meditation' } });
+    const get = async (version: string, platform: string) => (await h().get('/v1/bootstrap', { token: g.accessToken, headers: { 'x-app-version': version, 'x-platform': platform } })).body.data;
+    expect((await get('1.2.0', 'ios')).update).toEqual({ required: false, available: true, latest: '1.5.0', storeUrl: 'https://apps.apple.com/app/id1' });
+    expect((await get('1.5.0', 'ios')).update).toMatchObject({ required: false, available: false });
+    expect((await get('1.4.9', 'android')).update).toMatchObject({ available: true, storeUrl: expect.stringContaining('play.google.com') });
+    await setConfig('main', { minVersion: { ios: '1.3.0', android: '1.0.0' } });
+    expect((await get('1.2.0', 'ios')).update).toMatchObject({ required: true, available: false }); // one prompt at a time: the blocking one
+    await setConfig('main', { minVersion: { ios: '1.0.0', android: '1.0.0' }, latestVersion: null, storeUrls: null });
+    expect((await get('1.2.0', 'ios')).update).toEqual({ required: false, available: false, latest: null, storeUrl: null });
+  });
+
   it('maintenance: bootstrap still answers (with the flag), other app routes 503', async () => {
     const g = await guest(app);
     await setConfig('main', { maintenance: true });
