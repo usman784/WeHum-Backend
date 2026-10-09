@@ -12,6 +12,7 @@ import { QUEUES, QueueService } from '../../jobs/queues';
 import { ConfigService } from '../config/config.service';
 import { EntitlementService } from '../entitlements/entitlement.service';
 import { LiveService } from '../live/live.service';
+import { HIDDEN_COUNTRY } from '../../realtime/presence.service';
 import { isCounted, localDate, validTimes } from './meditation.rules';
 
 const iso = z.string().datetime({ offset: true });
@@ -65,18 +66,19 @@ export class MeditationsService {
       [out] = await this.db.select().from(meditations).where(eq(meditations.id, b.id));
       if (out!.userId !== user.id) throw new AppError('ALREADY_EXISTS', 'This id is already used');
     } else {
-      await this.afterInsert(user.id, date, counted, b.durationSec);
+      await this.afterInsert(user.id, date, counted, b.durationSec, u.country);
       await this.queues.add(QUEUES.stats, 'meditation', { meditationId: b.id }, { jobId: `stats-${b.id}`, attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
     }
     return { created, result: await this.result(user, out!, u.isGuest) };
   }
 
   /** Redis hot counters used by the live line and the MOTD card; both fail soft. */
-  private async afterInsert(userId: string, date: string, counted: boolean, durationSec: number) {
+  private async afterInsert(userId: string, date: string, counted: boolean, durationSec: number, country: string | null) {
     if (!counted) return;
     try {
       await this.redis.multi().sadd(K.practiced(date), userId).expire(K.practiced(date), TTL_3D).incr(K.medsToday(date)).expire(K.medsToday(date), TTL_3D)
         .incrby(K.minsToday(date), Math.max(1, Math.round(durationSec / 60))).expire(K.minsToday(date), TTL_3D).exec();
+      if (country && country !== HIDDEN_COUNTRY) await this.redis.multi().hincrby(K.medsTodayCountry(date), country, 1).expire(K.medsTodayCountry(date), TTL_3D).exec();
     } catch { /* counts are rebuilt from Postgres by the rollup; never fail a recording because of Redis */ }
   }
 

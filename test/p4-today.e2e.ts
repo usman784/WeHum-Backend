@@ -140,7 +140,7 @@ describe('P4 GET /v1/today', () => {
     expect(d.motd).toMatchObject({ date: dayIso(), lengths: [10, 30, 45], access: 'premium', fallback: false, practicedToday: expect.any(Number) });
     expect(d.live).toEqual({ total: 0, countries: 0, quiet: true, meditatedToday: 0 }); // nobody is meditating: never invented
     expect(d.group).toMatchObject({ lengthMin: 30, state: expect.stringMatching(/^(scheduled|lobby|live|ended)$/), waiting: 0, startsAt: `${dayIso()}T16:00:00.000Z` });
-    expect(d.freePick).toMatchObject({ sessionId: expect.any(String), title: expect.any(String), youtubeId: expect.stringMatching(/^seedYT/), durationSec: expect.any(Number) });
+    expect(d.freePick).toMatchObject({ sessionId: expect.any(String), title: expect.any(String), youtubeId: expect.stringMatching(/^[\w-]{11}$/), durationSec: expect.any(Number) });
     expect(d.program).toBeNull();
     expect(d.progress).toEqual({ minutesWeek: 0, meditationsWeek: 0, daysThisWeek: [false, false, false, false, false, false, false] });
     expect(d.dailyMessage).toBeNull();
@@ -216,6 +216,17 @@ describe('P4 GET /v1/today', () => {
     expect((await h().get('/v1/today', { token: g.accessToken })).body.data.live.quiet).toBe(false); // threshold is a CMS setting
     await setConfig('today', { emptyRoomThreshold: 10 });
     await redis.del(K.medsToday(dayIso()), K.vibration);
+  });
+
+  it('GET /v1/live: todayTop says where people meditated today (for the map when nobody is live); hidden countries never appear', async () => {
+    const g = await guest(app);
+    const day = dayIso();
+    await redis.del(K.medsTodayCountry(day));
+    await redis.hset(K.medsTodayCountry(day), { PK: 4, DE: 9, XX: 3, FR: 0 });
+    const r = await h().get('/v1/live', { token: g.accessToken });
+    expect(r.body.data.top).toEqual([]); // nobody is live right now…
+    expect(r.body.data.todayTop).toEqual([{ c: 'DE', n: 9 }, { c: 'PK', n: 4 }]); // …but the map still knows today
+    await redis.del(K.medsTodayCountry(day));
   });
 
   it('GET /v1/live: same numbers for when the socket is down', async () => {

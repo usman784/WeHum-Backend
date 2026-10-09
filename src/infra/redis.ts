@@ -34,6 +34,7 @@ export const K = {
   lobby: (date: string) => `lobby:${date}`,
   practiced: (date: string) => `motd:${date}:users`,
   medsToday: (date: string) => `med:${date}`,
+  medsTodayCountry: (date: string) => `med:${date}:c`, // hash country → people who meditated today (the map's "where")
   dedLimit: (userId: string, localDate: string) => `ded:${userId}:${localDate}`,
   today: (date: string, plan: 'free' | 'member') => `today:${date}:${plan}`,
   catalog: (version: number) => `catalog:v${version}`,

@@ -3,6 +3,7 @@ import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Mailer } from '../src/infra/mailer';
 import { PushTransport } from '../src/modules/push/push.transport';
+import { RevenueCatClient } from '../src/modules/subscriptions/revenuecat.client';
 import { UserDataService } from '../src/modules/users-admin/user-data.service';
 import { bootApp, guest, http, resetTestDb } from './helpers';
 
@@ -40,6 +41,7 @@ describe('Privacy & data (app screen 59)', () => {
 
   it('delete: needs the word DELETE, stops the account at once, job removes it and leaves the push topic', async () => {
     const g = await guest(app);
+    app.get(RevenueCatClient).fetchImpl = (async () => new Response('{}', { status: 200 })) as typeof fetch; // RevenueCat forgets the subscriber (no network in tests)
     const ops: { op: string; tokens: string[] }[] = [];
     app.get(PushTransport).topicImpl = async (op, _t, tokens) => { ops.push({ op, tokens }); return true; };
     await http(app).post('/v1/me/devices', { installId: g.installId, platform: 'ios', appVersion: '1.0.0', pushToken: 'fcm-token-delete-0001' }, { token: g.accessToken });

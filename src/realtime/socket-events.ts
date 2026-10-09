@@ -10,6 +10,7 @@ export interface LiveAgg {
   total: number;              // unique users meditating now
   countries: number;
   top: { c: string; n: number }[]; // ISO-2, top 50
+  todayTop?: { c: string; n: number }[]; // where people meditated today (ISO-2, top 50)
   quiet: boolean;             // total < emptyRoomThreshold
   meditatedToday: number;
   vibration: number;          // 0–100
