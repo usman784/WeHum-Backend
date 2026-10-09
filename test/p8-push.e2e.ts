@@ -19,6 +19,11 @@ const A = (t: string) => ({
 });
 const push = () => app.get(PushService);
 const HOUR = 3_600_000;
+/** A time zone where it is about noon right now, so "send now" is never held back by quiet hours (CI may run at 05:00 UTC). */
+const midday = () => {
+  const off = ((12 - new Date().getUTCHours() + 11) % 24) - 11; // -11..12
+  return off === 0 ? 'UTC' : off > 0 ? `Etc/GMT-${off}` : `Etc/GMT+${-off}`;
+};
 
 /** A person with a phone: guest + device with a push token, in a time zone, with a reminder time. */
 async function phone(o: { tz?: string; reminder?: string; name?: string; country?: string; token?: string; enabled?: boolean } = {}) {
@@ -259,7 +264,7 @@ describe('P8 announcements', () => {
   });
 
   it('send now: delivered, counted, stats announced, inbox written, a second send refused; nothing twice', async () => {
-    const people = await Promise.all([phone({ country: 'NA' }), phone({ country: 'NA' }), phone({ country: 'NA', token: 'fail-token-0001' })]);
+    const people = await Promise.all([phone({ country: 'NA', tz: midday() }), phone({ country: 'NA', tz: midday() }), phone({ country: 'NA', token: 'fail-token-0001', tz: midday() })]);
     const d = await draft({ countries: ['NA'], title: 'New meditation', body: 'Out now', deepLink: 'wehum://library' });
     const r = await A(adminTok).post(`/v1/admin/notifications/${d.id}/send`);
     expect(r.status).toBe(200);
@@ -357,9 +362,10 @@ describe('P8 announcements', () => {
     expect(await push().markOpened(p.id, 'daily_nudge')).toBe(true);
     expect(await push().markOpened(p.id, 'daily_nudge')).toBe(false);
     expect((await q(`SELECT opened FROM auto_notifications WHERE key='daily_nudge'`))[0]!.opened).toBe(before + 1);
-    const d = await draft({ countries: ['NF'] });
+    const p2 = await phone({ country: 'NG', tz: midday() });
+    const d = await draft({ countries: ['NG'] });
     await A(owner).post(`/v1/admin/notifications/${d.id}/send`);
-    expect(await push().markOpened(p.id, `ann:${d.id}`)).toBe(true);
+    expect(await push().markOpened(p2.id, `ann:${d.id}`)).toBe(true);
     expect((await q(`SELECT opened FROM notifications WHERE id=$1`, [d.id]))[0]!.opened).toBe(1);
   });
 });
