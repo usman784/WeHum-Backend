@@ -570,7 +570,7 @@ describe('P3 Today screen: MOTD + group + config', () => {
 
   it('settings: all groups readable by owner/admin, validated per key', async () => {
     const all = await A.get('/v1/admin/config', adminTok);
-    expect(Object.keys(all.body.data).sort()).toEqual(['breathwork', 'crisis', 'downloads', 'group', 'legal', 'main', 'moderation', 'silence', 'sitTimes', 'sos', 'today']);
+    expect(Object.keys(all.body.data).sort()).toEqual(['branding', 'breathwork', 'crisis', 'downloads', 'group', 'legal', 'main', 'moderation', 'push', 'silence', 'sitTimes', 'sos', 'today']);
     expect((await A.get('/v1/admin/config', editor)).status).toBe(403);
     const main = all.body.data.main.value;
     expect((await A.put('/v1/admin/config/main', { ...main, minVersion: { ios: '2', android: '1.0.0' } }, adminTok)).status).toBe(400);

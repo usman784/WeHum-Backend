@@ -49,6 +49,8 @@ export function membershipOf(u: { isGuest: boolean }, raw: Ent | null) {
   return { plan: 'free', label: u.isGuest ? 'Free · guest' : 'Free · account', status: 'free' };
 }
 
+const avatarOf = (v: string | null) => (v ? (/^https?:/.test(v) ? v : `${env.CDN_BASE_URL.replace(/\/$/, '')}/${v}`) : null);
+
 @Injectable()
 export class UsersAdminService {
   constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly data: UserDataService, private readonly queues: QueueService, private readonly writer: AdminWriter) {}
@@ -58,7 +60,7 @@ export class UsersAdminService {
     if (UUID.test(q)) return sql`u.id = ${q}::uuid`;
     const like = q.replace(/[\\%_]/g, (c) => `\\${c}`);
     if (q.includes('@')) return sql`u.email ilike ${like + '%'}`; // email prefix
-    return sql`(u.first_name ilike ${'%' + like + '%'} or u.email ilike ${like + '%'})`; // name (trigram index) or email prefix
+    return sql`(u.first_name ilike ${'%' + like + '%'} or u.username ilike ${like.replace(/^@/, '') + '%'} or u.email ilike ${like + '%'})`; // name (trigram index), username or email prefix
   }
 
   async counts() {
@@ -76,7 +78,7 @@ export class UsersAdminService {
     const conds: SQL[] = [sql`u.deleted_at is null`, TAB_SQL[q.tab], this.searchSql(q.q)];
     const c = decodeCursor(q.cursor);
     if (c) conds.push(sql`(u.last_active_at, u.id) < (${new Date(String(c.k))}, ${c.id}::uuid)`);
-    const rows = (await this.db.execute<Record<string, any>>(sql`SELECT u.id, u.first_name, u.email, u.is_guest, u.country, u.created_at, u.last_active_at, u.muted_at,
+    const rows = (await this.db.execute<Record<string, any>>(sql`SELECT u.id, u.first_name, u.last_name, u.username, u.avatar_url, u.email, u.is_guest, u.country, u.created_at, u.last_active_at, u.muted_at,
         e.active, e.product_id, e.period_type::text AS period_type, e.started_at, e.expires_at, e.will_renew, e.is_founding, e.store::text AS store,
         coalesce(s.meditations_total, 0) AS meditations, coalesce((SELECT sum(minutes) FROM user_daily_stats d WHERE d.user_id = u.id AND d.local_date >= date_trunc('week', now())::date), 0)::int AS week_minutes,
         coalesce((SELECT array_agg(DISTINCT i.provider::text) FROM auth_identities i WHERE i.user_id = u.id AND i.provider <> 'device'), '{}') AS providers
@@ -84,7 +86,7 @@ export class UsersAdminService {
       WHERE ${sql.join(conds, sql` AND `)} ORDER BY u.last_active_at DESC, u.id DESC LIMIT ${limit + 1}`)).rows; // eslint-disable-line @typescript-eslint/no-explicit-any
     const page = rows.slice(0, limit);
     const out = page.map((r) => ({
-      id: r.id, name: r.first_name, email: r.email, isGuest: r.is_guest, providers: r.providers, country: r.country, joinedAt: r.created_at, lastActiveAt: r.last_active_at, muted: !!r.muted_at,
+      id: r.id, name: r.first_name, lastName: r.last_name, username: r.username, avatarUrl: avatarOf(r.avatar_url), email: r.email, isGuest: r.is_guest, providers: r.providers, country: r.country, joinedAt: r.created_at, lastActiveAt: r.last_active_at, muted: !!r.muted_at,
       membership: membershipOf({ isGuest: r.is_guest }, r.product_id || r.active ? { active: r.active, productId: r.product_id, periodType: r.period_type, startedAt: r.started_at, expiresAt: r.expires_at, willRenew: r.will_renew, isFounding: r.is_founding, store: r.store } : null),
       weekMinutes: Number(r.week_minutes), meditations: Number(r.meditations),
     }));
@@ -113,7 +115,7 @@ export class UsersAdminService {
     const st = stats[0] ?? { minutes_total: 0, meditations_total: 0, group_total: 0 };
     const saved = firstIdentity[0]?.created_at ? new Date(firstIdentity[0].created_at) : null;
     return {
-      id: u.id, name: u.first_name, lastName: u.last_name, username: u.username, avatarUrl: u.avatar_url ? (/^https?:/.test(u.avatar_url) ? u.avatar_url : `${env.CDN_BASE_URL.replace(/\/$/, '')}/${u.avatar_url}`) : null, email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
+      id: u.id, name: u.first_name, lastName: u.last_name, username: u.username, avatarUrl: avatarOf(u.avatar_url), email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
       providers: [...new Set(ids.filter((i) => i.provider !== 'device').map((i) => i.provider))],
       streak: { current: streak.current, record: streak.record, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone }, heartRateReadings: hr,
       accountSavedAt: saved, wasGuestDays: saved ? Math.max(0, Math.round((saved.getTime() - new Date(u.created_at).getTime()) / 86_400_000)) : null,
