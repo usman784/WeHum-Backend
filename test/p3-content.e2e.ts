@@ -570,7 +570,7 @@ describe('P3 Today screen: MOTD + group + config', () => {
 
   it('settings: all groups readable by owner/admin, validated per key', async () => {
     const all = await A.get('/v1/admin/config', adminTok);
-    expect(Object.keys(all.body.data).sort()).toEqual(['breathwork', 'group', 'legal', 'main', 'moderation', 'sos', 'today']);
+    expect(Object.keys(all.body.data).sort()).toEqual(['breathwork', 'crisis', 'downloads', 'group', 'legal', 'main', 'moderation', 'silence', 'sitTimes', 'sos', 'today']);
     expect((await A.get('/v1/admin/config', editor)).status).toBe(403);
     const main = all.body.data.main.value;
     expect((await A.put('/v1/admin/config/main', { ...main, minVersion: { ios: '2', android: '1.0.0' } }, adminTok)).status).toBe(400);
@@ -591,7 +591,7 @@ describe('P3 Today screen: MOTD + group + config', () => {
 
   it('group meditation: time/length validated, history of past days; saving updates the MOTD payload', async () => {
     const g0 = await A.get('/v1/admin/group', editor);
-    expect(g0.body.data.value).toEqual({ startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 15, reminderMin: 10 });
+    expect(g0.body.data.value).toMatchObject({ startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 15, reminderMin: 10, cadence: 'daily' });
     expect(g0.body.data.history.length).toBeGreaterThan(0);
     expect(g0.body.data.history[0]).toMatchObject({ date: expect.any(String), title: expect.any(String), groupJoined: expect.any(Number) });
     expect(g0.body.data.history.every((h: { date: string }) => h.date < dayIso())).toBe(true);

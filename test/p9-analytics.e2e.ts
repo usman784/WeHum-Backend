@@ -349,7 +349,7 @@ describe('P9 users', () => {
     await sub(`e-goner-${id}`, id, 'INITIAL_PURCHASE', ROLL, { price: 79 });
     const exp = await A(adminTok).post(`/v1/admin/users/${id}/export`);
     await app.get(UserDataService).exportUser(exp.body.data.jobId, id);
-    expect((await app.get(S3Service).listKeys(`exports/${id}/`)).length).toBe(2);
+    expect((await app.get(S3Service).listKeys(`exports/${id}/`)).length).toBe(3);
 
     expect((await A(editor).del(`/v1/admin/users/${id}`, { confirm: 'goner@list.test' })).status).toBe(403);
     const wrong = await A(adminTok).del(`/v1/admin/users/${id}`, { confirm: 'someone@else.test' });

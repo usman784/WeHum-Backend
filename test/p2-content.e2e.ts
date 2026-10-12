@@ -41,7 +41,7 @@ describe('P2 catalog snapshot', () => {
     expect(c.teachers).toHaveLength(1);
     expect(c.sessions.length).toBe(28); // 24 premium + 4 free, SoS excluded
     expect(c.programs[0].days).toHaveLength(7);
-    expect(c.soundBlocks).toHaveLength(13);
+    expect(c.soundBlocks).toHaveLength(15); // 13 + opening/closing bells
     expect(c.sos.tiles).toHaveLength(8);
     expect(c.sos.tiles[0]).toMatchObject({ feeling: 'Panic' });
     expect(c.sessions.some((s: { isSos?: boolean }) => s.isSos)).toBe(false);
@@ -202,9 +202,11 @@ describe('P2 MOTD + daily messages', () => {
     await r.del(K.practiced(today)); await r.quit();
   });
 
-  it('daily messages are member-only', async () => {
+  it('daily messages: premium bodies are member-only, the archive lists them as locked', async () => {
     expect((await h().get(`/v1/daily-messages/${dayIso()}`, { token: free.accessToken })).body.error.code).toBe('PREMIUM_REQUIRED');
-    expect((await h().get('/v1/daily-messages', { token: free.accessToken })).status).toBe(403);
+    const list = await h().get('/v1/daily-messages', { token: free.accessToken });
+    expect(list.status).toBe(200);
+    for (const it of list.body.data.items ?? list.body.data) if (it.access === 'premium') expect(it.locked).toBe(true);
     expect((await h().get('/v1/daily-messages')).status).toBe(401);
   });
 
