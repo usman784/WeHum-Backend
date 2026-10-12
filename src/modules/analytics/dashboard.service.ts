@@ -25,7 +25,7 @@ export class DashboardService {
     const today = utcDay(now);
     const monday = addDay(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
     const week = Array.from({ length: 7 }, (_, i) => addDay(monday, i));
-    const [agg, medsToday, medsLastWeek, summary, lib, messages, top, motd, nextGroup] = await Promise.all([
+    const [agg, medsToday, medsLastWeek, summary, lib, messages, top, motd, nextGroup, extras] = await Promise.all([
       this.redis.get(K.liveAggLast).then((v) => (v ? (JSON.parse(v) as { total?: number; countries?: number }) : null)),
       this.analytics.medsOn(today), this.analytics.medsOn(addDay(today, -7)), this.subs.summary(),
       this.db.execute<{ sessions: number; programs: number; themes: number }>(sql`SELECT (SELECT count(*) FROM sessions WHERE status='live')::int AS sessions, (SELECT count(*) FROM programs WHERE status='live')::int AS programs, (SELECT count(*) FROM themes WHERE visible)::int AS themes`).then((r) => r.rows[0]!),
@@ -33,6 +33,7 @@ export class DashboardService {
       this.analytics.topSessions(7, 5),
       this.db.execute<{ date: string; title: string; lengths: number[] }>(sql`SELECT d.date::text, s.title, coalesce((SELECT array_agg(v.length_min ORDER BY v.length_min) FROM motd_variants v JOIN media_assets a ON a.id = v.media_id AND a.status = 'ready' WHERE v.date = d.date), '{}') AS lengths FROM motd_days d JOIN sessions s ON s.id = d.session_id WHERE d.date >= ${today}::date AND d.date <= ${addDay(today, 7)}::date ORDER BY d.date`).then((r) => r.rows),
       this.group.next(now),
+      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; streaks7?: number }) : null)).catch(() => null),
     ]);
     const byDate = new Map(messages.map((m) => [m.date, m]));
     const attention: Record<string, unknown>[] = [];
@@ -48,6 +49,7 @@ export class DashboardService {
         liveNow: agg?.total ?? 0, liveCountries: agg?.countries ?? 0, meditationsToday: medsToday, meditationsLastWeekSameDay: medsLastWeek,
         meditationsDeltaPct: medsLastWeek ? Math.round(((medsToday - medsLastWeek) / medsLastWeek) * 1000) / 10 : null,
         payingMembers: summary.payingMembers.total, inTrial: summary.inTrial, mrrUsd: summary.mrrUsd, library: lib,
+        silenceNow: extras?.silenceNow ?? 0, streaks7: extras?.streaks7 ?? 0,
       },
       moderationOpen: open,
       dailyMessages: week.map((d) => ({ date: d, title: byDate.get(d)?.title ?? null, type: byDate.get(d)?.type ?? null, status: byDate.get(d)?.status ?? 'missing' })),
