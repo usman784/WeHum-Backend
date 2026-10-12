@@ -1490,3 +1490,26 @@ Decisions / deviations:
 - Gratitude kinds follow the app design's tabs (Gratitude, Affirmations, Sending love); the fourth tab cut off in the design is not known.
 
 Status: ✅ done
+
+
+### Phase P12 — Stitch redesign (S1–S7)
+Date: 2026-10-12
+
+Built (map: `../stitch-export/SCREEN_MAP.md`, decisions D1–D10 in §1.2):
+- **Forgiving streak** (`streak.ts`): one grace day per ISO week, record, weekly goal, rest flag per day; `GET /v1/me/progress` and Today carry `streak`, `lifetime`, `weekly[]`.
+- **30 s preview** (`POST /v1/media/preview-url`, ffmpeg clip with 2 s fade made by the media worker) for locked premium meditations; members get the full URL.
+- **Silence Room** (`GET /v1/silence`, socket room `silence`, event `silence:live`), **world gauge** (`GET /v1/live/world`, belts from the ISO country), **crisis directory** (`GET /v1/sos/directory?country=`).
+- **Group sits**: `group.cadence` daily/hourly, slot ids (`YYYY-MM-DD` or `YYYY-MM-DDTHH`), intentions (`PUT /v1/group/intention`), waiting per region, focus card, hourly warnings.
+- **Daily messages**: access free/premium (archive rows `locked`), transcript lines, video, save/unsave. **Kudos** (`POST /v1/sessions/:id/kudos`), **community feed**, **members-at**, **dedication place** + `POST /v1/me/dedications/anonymize`.
+- **Challenges live**: cohort sprint with unlock time, grace days, badge, `GET /v1/challenges/:id`.
+- **Library summary**, catalog `phases`, `sizeMb`, `completedToday`; config keys `silence`, `crisis`, `sitTimes`, `downloads`, `sos.soundBeds`; export zip (telemetry.json + two CSVs). Migration `0007_stitch.sql`.
+
+Tests run: `npm test` → 26 files, 354 passed (with `FFMPEG_PATH` set, see below). New: `p12-stitch.e2e.ts` (11) and `streak.spec.ts` (9). Existing expectations updated on purpose: catalog sound blocks 13 → 15 (bells), config groups list, bootstrap `challenges: true` and `group.cadence`, daily-message archive for free users (200 with locked rows), export writes three files (json, csv, zip).
+
+Decisions / deviations:
+- Not built (client decision D4): the intent and first-sit onboarding screens.
+- Heart rate is a device-only optional number per meditation (`features.heartRate`, default off); the server never receives a waveform.
+- The `group/next` p50 budget (15 ms) is close under load (≈16 ms measured once while Docker was busy; p95 ≈ 20 ms); left as is.
+- Media tests need an ffmpeg binary: `ffmpeg-static` was not downloaded on this machine, so the run used `FFMPEG_PATH=/usr/local/bin/ffmpeg`.
+
+Status: ✅ done (code, migration, tests)
