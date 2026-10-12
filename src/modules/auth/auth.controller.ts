@@ -25,7 +25,7 @@ const SocialDto = z.object({ idToken: z.string().min(20), rawNonce: z.string().m
 const email = z.string().trim().toLowerCase().email().max(254);
 const password = z.string().min(8, 'At least 8 characters').max(128).refine((p) => !COMMON.has(p.toLowerCase()), 'This password is too common');
 const EmailLoginDto = z.object({ email, password: z.string().min(1).max(128) });
-const EmailLinkDto = z.object({ email, password, firstName: z.string().trim().min(1).max(30).optional() });
+const EmailLinkDto = z.object({ email, password, firstName: z.string().trim().min(1).max(30).optional(), lastName: z.string().trim().min(1).max(30).optional(), username: z.string().trim().min(3).max(20).optional() });
 const EmailOnlyDto = z.object({ email });
 const TokenDto = z.object({ token: z.string().min(20) });
 const ResetDto = z.object({ token: z.string().min(20), password });

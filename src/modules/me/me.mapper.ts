@@ -18,10 +18,15 @@ export function toEntitlement(e: E) {
 }
 
 /** Public shape of the current user (backend spec §5.4 bootstrap.me). */
-export function toMe(u: U, ids: I[], e: E) {
+export function toMe(u: U, ids: I[], e: E, avatarUrl: string | null = null) {
   return {
     id: u.id,
     firstName: u.firstName,
+    lastName: u.lastName,
+    username: u.username,
+    usernameChangedAt: u.usernameChangedAt?.toISOString() ?? null,
+    usernameNextChangeAt: u.usernameChangedAt ? new Date(u.usernameChangedAt.getTime() + 7 * 86_400_000).toISOString() : null,
+    avatarUrl,
     email: u.email,
     isGuest: u.isGuest,
     providers: [...new Set(ids.map((i) => i.provider).filter((p) => p !== 'device'))],

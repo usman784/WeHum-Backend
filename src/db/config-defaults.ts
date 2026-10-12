@@ -7,6 +7,8 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
     features: { challenges: true, gratitude: false, breathwork: false, milestones: false, intent: false, streaks: true, hourlySits: false, heartRate: false },
     supportEmail: 'hello@wehum.app', defaultReminderTime: '07:00', languages: ['en'],
   },
+  branding: { appName: 'WeHum', tagline: 'Meditate together', logoMediaId: null },
+  push: { maxPerDay: 2 },
   today: { emptyRoomThreshold: 10, freeHomePick: 'random', showDailyMessage: false, sections: { progress: true, liveCounter: true, worldMap: true } },
   group: {
     startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 15, reminderMin: 10,

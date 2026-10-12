@@ -28,6 +28,8 @@ export const CONFIG_SCHEMAS = {
     features: z.object({ challenges: flag, gratitude: flag, breathwork: flag, milestones: flag, intent: flag, streaks: flag.default(true), hourlySits: flag.default(false), heartRate: flag.default(false) }).strict(),
     supportEmail: z.string().email(), defaultReminderTime: hhmm, languages: z.array(z.string().max(10)).min(1).max(20),
   }).strict(),
+  branding: z.object({ appName: z.string().trim().min(1).max(30), tagline: z.string().trim().max(80), logoMediaId: z.string().uuid().nullable() }).strict(),
+  push: z.object({ maxPerDay: z.number().int().min(1).max(10) }).strict(),
   today: z.object({
     emptyRoomThreshold: z.number().int().min(0).max(1000), freeHomePick: z.enum(['random', 'newest']), showDailyMessage: flag,
     sections: z.object({ progress: flag, liveCounter: flag, worldMap: flag }).strict(),
@@ -108,7 +110,7 @@ export class ConfigAdminService {
   }
 }
 
-const ConfigKeys = new Zod(z.enum(['main', 'legal', 'moderation', 'today', 'group', 'sos', 'silence', 'crisis', 'sitTimes', 'downloads']));
+const ConfigKeys = new Zod(z.enum(['main', 'legal', 'moderation', 'today', 'group', 'sos', 'silence', 'crisis', 'sitTimes', 'downloads', 'branding', 'push']));
 
 @ApiTags('Admin Settings')
 @ApiBearerAuth()

@@ -16,10 +16,15 @@ import { K, REDIS } from '../../infra/redis';
 import { toMe } from '../me/me.mapper';
 import { PushTransport } from '../push/push.transport';
 import { SocialVerifier } from './social.verifier';
+import { UsernameService, validateUsername } from '../me/username.service';
+import { CdnSigner } from '../../infra/cdn';
 import { opaqueToken, sha256, TokensService } from './tokens.service';
 
 export interface DeviceInfo { installId: string; platform: 'ios' | 'android'; appVersion: string; osVersion?: string; model?: string }
 type Tx = Parameters<Parameters<DB['transaction']>[0]>[0];
+
+/** Apple's private relay addresses say nothing about the person, so the first name is the better seed. */
+const seedOf = (email?: string | null, first?: string | null) => (email && !/privaterelay\.appleid\.com$/i.test(email) ? email : first || email);
 
 const MERGE_TTL = 600;
 const LOCK_LIMIT = 5, LOCK_SEC = 900;
@@ -33,6 +38,8 @@ export class AuthService {
     private readonly social: SocialVerifier,
     private readonly mailer: Mailer,
     private readonly push: PushTransport,
+    private readonly usernames: UsernameService,
+    private readonly cdn: CdnSigner,
   ) {}
 
   // ───────────── sessions ─────────────
@@ -44,7 +51,7 @@ export class AuthService {
       this.db.select({ provider: authIdentities.provider }).from(authIdentities).where(eq(authIdentities.userId, userId)),
       this.db.query.entitlements.findFirst({ where: eq(entitlements.userId, userId) }),
     ]);
-    return toMe(u, ids, ent);
+    return toMe(u, ids, ent, this.cdn.publicUrl(u.avatarUrl));
   }
 
   /** Access + refresh for a user on a device. */
@@ -117,21 +124,24 @@ export class AuthService {
   }
 
   /** Turn the caller (guest) into an account by attaching an identity. */
-  private async attach(tx: Tx, userId: string, provider: 'apple' | 'google' | 'email', providerUid: string, extra: { email?: string | null; emailVerified?: boolean; firstName?: string | null; passwordHash?: string }) {
+  private async attach(tx: Tx, userId: string, provider: 'apple' | 'google' | 'email', providerUid: string, extra: { email?: string | null; emailVerified?: boolean; firstName?: string | null; lastName?: string | null; picture?: string | null; username?: string | null; passwordHash?: string }) {
     await tx.insert(authIdentities).values({ id: uuid(), userId, provider, providerUid, passwordHash: extra.passwordHash });
     const patch: Partial<typeof users.$inferInsert> = { isGuest: false };
     if (extra.email) {
       const [clash] = await tx.select({ id: users.id }).from(users).where(and(eq(users.email, extra.email), sql`${users.id} <> ${userId}`));
       if (!clash) { patch.email = extra.email; if (extra.emailVerified) patch.emailVerifiedAt = new Date(); }
     }
-    const [cur] = await tx.select({ firstName: users.firstName }).from(users).where(eq(users.id, userId));
+    const [cur] = await tx.select({ firstName: users.firstName, lastName: users.lastName, username: users.username, avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, userId));
     if (!cur?.firstName && extra.firstName) patch.firstName = extra.firstName;
+    if (!cur?.lastName && extra.lastName) patch.lastName = extra.lastName;
+    if (!cur?.avatarUrl && extra.picture) patch.avatarUrl = extra.picture;
+    if (!cur?.username) patch.username = extra.username || (await this.usernames.generate(seedOf(extra.email, extra.firstName)));
     await tx.update(users).set(patch).where(eq(users.id, userId));
   }
 
-  private async newAccount(tx: Tx, extra: { email?: string | null; emailVerified?: boolean; firstName?: string | null; timezone?: string }) {
+  private async newAccount(tx: Tx, extra: { email?: string | null; emailVerified?: boolean; firstName?: string | null; lastName?: string | null; picture?: string | null; username?: string | null; timezone?: string }) {
     const id = uuid();
-    await tx.insert(users).values({ id, isGuest: false, email: extra.email ?? null, emailVerifiedAt: extra.emailVerified ? new Date() : null, firstName: extra.firstName ?? null, timezone: extra.timezone ?? 'UTC' });
+    await tx.insert(users).values({ id, isGuest: false, email: extra.email ?? null, emailVerifiedAt: extra.emailVerified ? new Date() : null, firstName: extra.firstName ?? null, lastName: extra.lastName ?? null, avatarUrl: extra.picture ?? null, username: extra.username || (await this.usernames.generate(seedOf(extra.email, extra.firstName))), timezone: extra.timezone ?? 'UTC' });
     await tx.insert(userStats).values({ userId: id });
     return id;
   }
@@ -176,13 +186,15 @@ export class AuthService {
     return this.reissue(user);
   }
 
-  async linkEmail(user: AppUser, body: { email: string; password: string; firstName?: string }) {
+  async linkEmail(user: AppUser, body: { email: string; password: string; firstName?: string; lastName?: string; username?: string }) {
     const email = body.email.toLowerCase();
     if (await this.findIdentity('email', email)) throw new AppError('ACCOUNT_EXISTS', 'This email already has an account. Log in to merge.', { mergeToken: await this.mergeTokenFor(user.id), provider: 'email' });
     const [taken] = await this.db.select({ id: users.id }).from(users).where(and(eq(users.email, email), sql`${users.id} <> ${user.id}`));
     if (taken) throw new AppError('ACCOUNT_EXISTS', 'This email already has an account. Log in to merge.', { mergeToken: await this.mergeTokenFor(user.id), provider: 'email' });
     const passwordHash = await argon2.hash(body.password, { type: argon2.argon2id });
-    await this.db.transaction((tx) => this.attach(tx, user.id, 'email', email, { email, firstName: body.firstName, passwordHash }));
+    let username: string | null = null;
+    if (body.username) { const v = validateUsername(body.username); if (!v.ok) throw new AppError('VALIDATION_FAILED', v.reason); if (!(await this.usernames.isAvailable(v.value, user.id))) throw new AppError('ALREADY_EXISTS', 'That username is taken', { suggestions: await this.usernames.suggest(v.value, 3) }); username = v.value; }
+    await this.db.transaction((tx) => this.attach(tx, user.id, 'email', email, { email, firstName: body.firstName, lastName: body.lastName, username, passwordHash }));
     await this.sendEmailToken('verify', email, user.id);
     return this.reissue(user);
   }

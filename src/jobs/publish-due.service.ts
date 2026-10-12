@@ -32,10 +32,10 @@ export class PublishDueService {
     return published;
   }
 
-  /** Daily messages set to "scheduled" go live on their day (UTC). The count of meditations is what `run` returns. */
+  /** Daily messages set to "scheduled" go live at their publish time, or on their day (UTC) when none is set. The count of meditations is what `run` returns. */
   async publishMessages(system = SYSTEM_ACTOR('catalog.publishDue')): Promise<number> {
     const due = await this.db.select({ date: dailyMessages.date }).from(dailyMessages)
-      .where(and(eq(dailyMessages.status, 'scheduled'), lte(dailyMessages.date, sql`(now() at time zone 'utc')::date`))).limit(100);
+      .where(and(eq(dailyMessages.status, 'scheduled'), sql`((${dailyMessages.publishAt} is not null and ${dailyMessages.publishAt} <= now()) or (${dailyMessages.publishAt} is null and ${dailyMessages.date} <= (now() at time zone 'utc')::date))`)).limit(100);
     let live = 0;
     for (const m of due) {
       const ok = await this.writer.run(system, { action: 'dailyMessage.publish', type: 'dailyMessage', id: m.date }, async (tx) => {

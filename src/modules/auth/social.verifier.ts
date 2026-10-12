@@ -4,7 +4,10 @@ import { env } from '../../config/env';
 import { AppError } from '../../common/errors';
 import { sha256 } from './tokens.service';
 
-export interface SocialIdentity { provider: 'apple' | 'google'; sub: string; email: string | null; emailVerified: boolean; firstName: string | null }
+export interface SocialIdentity { provider: 'apple' | 'google'; sub: string; email: string | null; emailVerified: boolean; firstName: string | null; lastName?: string | null; picture?: string | null }
+
+/** "Jane Q Doe" → "Q Doe" (everything after the first word). */
+const lastOf = (name: unknown): string | null => (typeof name === 'string' && name.trim().includes(' ') ? name.trim().split(/\s+/).slice(1).join(' ').slice(0, 30) : null);
 
 const CFG = {
   apple: { jwks: 'https://appleid.apple.com/auth/keys', iss: ['https://appleid.apple.com'], aud: () => env.APPLE_BUNDLE_IDS.split(',').map((s) => s.trim()).filter(Boolean) },
@@ -48,7 +51,7 @@ export class SocialVerifier {
     if (fb.sign_in_provider !== fbProvider || !sub) throw new AppError('TOKEN_INVALID', `Not a ${provider} sign-in`);
     const email = typeof p.email === 'string' ? p.email.toLowerCase() : null;
     const first = (typeof p.name === 'string' ? p.name.split(' ')[0] : null) || opts.firstName || null;
-    return { provider, sub, email, emailVerified: p.email_verified === true, firstName: first ? first.slice(0, 30) : null };
+    return { provider, sub, email, emailVerified: p.email_verified === true, firstName: first ? first.slice(0, 30) : null, lastName: lastOf(p.name), picture: typeof p.picture === 'string' ? p.picture : null };
   }
 
   async verify(provider: 'apple' | 'google', idToken: string, opts: { rawNonce?: string; firstName?: string | null } = {}): Promise<SocialIdentity> {
@@ -68,6 +71,6 @@ export class SocialVerifier {
     const email = typeof p.email === 'string' ? p.email.toLowerCase() : null;
     const verified = p.email_verified === true || p.email_verified === 'true';
     const first = provider === 'google' ? (p.given_name as string | undefined) ?? null : opts.firstName ?? null;
-    return { provider, sub: String(p.sub), email, emailVerified: verified, firstName: first ? first.slice(0, 30) : null };
+    return { provider, sub: String(p.sub), email, emailVerified: verified, firstName: first ? first.slice(0, 30) : null, lastName: provider === 'google' ? ((p.family_name as string | undefined) ?? null) : null, picture: typeof p.picture === 'string' ? p.picture : null };
   }
 }

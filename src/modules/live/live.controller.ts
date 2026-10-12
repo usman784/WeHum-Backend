@@ -58,6 +58,7 @@ export class LiveController {
   async publicLive(@Res({ passthrough: true }) res: FastifyReply) {
     res.header('cache-control', 'public, max-age=10');
     const s = await this.live.snapshot(utcToday());
-    return { meditatedToday: s.meditatedToday, meditatingNow: s.total, at: s.at };
+    const b = await this.config.branding();
+    return { meditatedToday: s.meditatedToday, meditatingNow: s.total, at: s.at, branding: { appName: b.appName, logoUrl: b.logoUrl } };
   }
 }

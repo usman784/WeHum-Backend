@@ -64,7 +64,17 @@ export class PushService {
   /** `ON CONFLICT DO NOTHING` on the (user, key, local date) primary key: only the users that were not sent this key today come back. */
   private async claim(rows: { userId: string; date: string }[], key: string): Promise<Set<string>> {
     if (!rows.length) return new Set();
-    const got = await this.db.insert(pushLog).values(rows.map((r) => ({ userId: r.userId, key, localDate: r.date }))).onConflictDoNothing().returning({ userId: pushLog.userId });
+    // one person gets at most `push.maxPerDay` pushes per local day (CMS Settings → Notifications)
+    const cap = (await this.config.get<{ maxPerDay: number }>('push')).value.maxPerDay ?? 2;
+    const allowed: typeof rows = [];
+    for (const date of new Set(rows.map((r) => r.date))) {
+      const ids = rows.filter((r) => r.date === date).map((r) => r.userId);
+      const sent = await this.db.select({ userId: pushLog.userId, n: sql<number>`count(*)::int` }).from(pushLog).where(and(eq(pushLog.localDate, date), inArray(pushLog.userId, ids))).groupBy(pushLog.userId);
+      const n = new Map(sent.map((r) => [r.userId, r.n]));
+      allowed.push(...rows.filter((r) => r.date === date && (n.get(r.userId) ?? 0) < cap));
+    }
+    if (!allowed.length) return new Set();
+    const got = await this.db.insert(pushLog).values(allowed.map((r) => ({ userId: r.userId, key, localDate: r.date }))).onConflictDoNothing().returning({ userId: pushLog.userId });
     return new Set(got.map((g) => g.userId));
   }
 
@@ -93,9 +103,9 @@ export class PushService {
           .where(and(eq(users.timezone, tz), eq(users.reminderEnabled, true), eq(users.reminderTime, hhmm), sql`${users.deletedAt} is null`,
             sql`exists (select 1 from devices d where d.user_id = users.id and d.push_token is not null)`));
         if (!due.length) continue;
-        const [todays] = await this.db.select({ title: dailyMessages.title }).from(dailyMessages).where(and(eq(dailyMessages.date, date), eq(dailyMessages.status, 'live')));
+        const [todays] = await this.db.select({ title: dailyMessages.title, pushTime: dailyMessages.pushTime }).from(dailyMessages).where(and(eq(dailyMessages.date, date), eq(dailyMessages.status, 'live')));
         // "One push per day": a due message and the nudge are one push, with the message's copy.
-        const withMessage = todays && message?.enabled ? due.filter((u) => u.messagePush) : [];
+        const withMessage = todays && !todays.pushTime && message?.enabled ? due.filter((u) => u.messagePush) : [];
         const mset = await this.claim(withMessage.map((u) => ({ userId: u.id, date })), 'daily_message');
         if (mset.size) {
           await this.claim([...mset].map((userId) => ({ userId, date })), 'daily_nudge'); // the nudge is used up too
@@ -117,9 +127,30 @@ export class PushService {
         }
       }
     }
+    out.nudges += await this.timedMessages(now);
     out.group = await this.groupWarning(now);
     out.announcements = await this.announcements(now);
     return out;
+  }
+
+  /** Daily messages with their own push time (CMS: "Push at"): everyone whose local clock shows that minute, once a day. */
+  private async timedMessages(now: number): Promise<number> {
+    const message = await this.auto('daily_message');
+    if (!message?.enabled) return 0;
+    const zones = await this.db.selectDistinct({ tz: users.timezone }).from(users).where(and(eq(users.dailyMessagePush, true), sql`${users.deletedAt} is null`));
+    let sent = 0;
+    for (const { tz } of zones) {
+      const { date, hhmm } = localClock(now, tz);
+      const [m] = await this.db.select({ title: dailyMessages.title }).from(dailyMessages).where(and(eq(dailyMessages.date, date), eq(dailyMessages.status, 'live'), eq(dailyMessages.pushTime, hhmm)));
+      if (!m) continue;
+      const due = await this.db.select({ id: users.id }).from(users).where(and(eq(users.timezone, tz), eq(users.dailyMessagePush, true), sql`${users.deletedAt} is null`, sql`exists (select 1 from devices d where d.user_id = users.id and d.push_token is not null)`));
+      const got = await this.claim(due.map((u) => ({ userId: u.id, date })), 'daily_message');
+      if (!got.size) continue;
+      const r = await this.deliver([...got], { title: message.title, body: fill(message.body, { title: m.title }), type: 'daily_message', deepLink: 'wehum://today' });
+      await this.count('daily_message', r.delivered.length);
+      sent += r.delivered.length;
+    }
+    return sent;
   }
 
   /**

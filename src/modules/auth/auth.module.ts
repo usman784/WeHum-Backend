@@ -11,17 +11,20 @@ import { AuthService } from './auth.service';
 import { SocialVerifier } from './social.verifier';
 import { AttestationService } from './attestation';
 import { TokensService } from './tokens.service';
+import { CdnSigner } from '../../infra/cdn';
+import { S3Service } from '../../infra/s3';
+import { UsernameService } from '../me/username.service';
 
 @Module({
   controllers: [AuthController, MeController, TimeController],
   providers: [
-    TokensService, SocialVerifier, AuthService, Mailer, ConfigService, EntitlementService, AttestationService,
+    TokensService, SocialVerifier, AuthService, UsernameService, CdnSigner, S3Service, Mailer, ConfigService, EntitlementService, AttestationService,
     // order matters: who are you → how often → is this app version allowed
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: AppGateGuard },
   ],
-  exports: [TokensService, AuthService, Mailer, ConfigService, EntitlementService, AttestationService],
+  exports: [TokensService, AuthService, UsernameService, Mailer, ConfigService, EntitlementService, AttestationService],
 })
 export class AuthModule {}

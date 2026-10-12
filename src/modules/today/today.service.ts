@@ -46,12 +46,12 @@ export class TodayService {
    * (and `maintenance: true`) in the payload instead of an error, so it can show the right screen.
    */
   async bootstrap(user: AppUser, headers: { version?: string; platform?: string }) {
-    const [me, main, today, group, sos, legal, founding, catalogVersion, sitTimes, downloads] = await Promise.all([
+    const [me, main, today, group, sos, legal, founding, catalogVersion, sitTimes, downloads, branding] = await Promise.all([
       this.auth.me(user.id),
       this.config.get<MainConfig>('main'), this.config.get<TodayConfig>('today'), this.config.get<GroupConfig>('group'),
       this.config.get<Record<string, unknown> & { title: string; help: unknown }>('sos'), this.config.get('legal'),
       this.founding(), this.catalog.version(),
-      this.config.get<SitTimesConfig>('sitTimes'), this.config.get<{ quotaMb: number }>('downloads'),
+      this.config.get<SitTimesConfig>('sitTimes'), this.config.get<{ quotaMb: number }>('downloads'), this.config.branding(),
     ]);
     const min = headers.platform === 'ios' || headers.platform === 'android' ? main.value.minVersion[headers.platform] : undefined;
     const plat = headers.platform === 'ios' || headers.platform === 'android' ? headers.platform : undefined;
@@ -73,8 +73,8 @@ export class TodayService {
       features: main.value.features,
       today: { emptyRoomThreshold: today.value.emptyRoomThreshold, freeHomePick: today.value.freeHomePick, showDailyMessage: today.value.showDailyMessage },
       group: { startUtc: group.value.startUtc, lengthMin: group.value.lengthMin, lobbyOpenMin: group.value.lobbyOpenMin, reminderMin: group.value.reminderMin, cadence: group.value.cadence ?? 'daily', hourly: group.value.hourly ?? null },
-      founding, catalogVersion,
-      configVersion: [main, today, group, sos, legal, sitTimes, downloads].reduce((s, c) => s + c.version, 0),
+      founding, catalogVersion, branding: { appName: branding.appName, tagline: branding.tagline, logoUrl: branding.logoUrl },
+      configVersion: [main, today, group, sos, legal, sitTimes, downloads, branding].reduce((s, c) => s + c.version, 0),
       sitTimes: sitTimes.value.blocks, downloads: { quotaMb: downloads.value.quotaMb },
       sos: { title: sos.value.title, help: sos.value.help },
       socket: { url: env.PUBLIC_API_URL.replace(/^http/, 'ws'), namespace: '/live' },

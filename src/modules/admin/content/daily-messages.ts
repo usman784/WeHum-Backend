@@ -10,7 +10,7 @@ import { dailyMessages } from '../../../db/schema';
 import { DRIZZLE, type DB } from '../../../infra/core.module';
 import { CONTENT_ROLES } from '../../admin-auth/rbac';
 import { AdminWriter, assertVersion, CurrentActor, etag, type Actor } from '../admin-writer';
-import { isoDate, uuid as uuidDto } from '../dto';
+import { hhmm, isoDate, uuid as uuidDto } from '../dto';
 import { readyMedia } from '../media-check';
 
 const PutDto = z.object({
@@ -21,6 +21,9 @@ const PutDto = z.object({
   transcript: z.array(z.object({ t: z.number().int().min(0).max(3600), text: z.string().trim().min(1).max(400), section: z.string().trim().max(40).optional() }).strict()).max(200).default([]),
   videoMediaId: uuidDto.nullable().optional(),
   access: z.enum(['free', 'premium']).default('premium'),
+  /** Scheduling: go live at this moment (status "scheduled"), and push at this local time. */
+  publishAt: z.string().datetime().nullable().optional(),
+  pushTime: hhmm.nullable().optional(),
 }).strict();
 const RangeQuery = z.object({ from: isoDate.optional(), to: isoDate.optional() });
 const DateParam = new Zod(isoDate);
@@ -57,7 +60,7 @@ export class DailyMessagesAdminService {
     return this.writer.run(actor, { action: 'dailyMessage.upsert', type: 'dailyMessage', id: date }, async (tx) => {
       const [cur] = await tx.select().from(dailyMessages).where(eq(dailyMessages.date, date)).for('update');
       if (cur) assertVersion(ifMatch, cur);
-      const values = { ...b, text: b.text ?? null, mediaId: b.mediaId ?? null, imageMediaId: b.imageMediaId ?? null, durationSec: b.durationSec ?? null, themeTag: b.themeTag ?? null, videoMediaId: b.videoMediaId ?? null };
+      const values = { ...b, text: b.text ?? null, mediaId: b.mediaId ?? null, imageMediaId: b.imageMediaId ?? null, durationSec: b.durationSec ?? null, themeTag: b.themeTag ?? null, videoMediaId: b.videoMediaId ?? null, publishAt: b.status === 'scheduled' && b.publishAt ? new Date(b.publishAt) : null, pushTime: b.pushTime ?? null };
       const [row] = cur
         ? await tx.update(dailyMessages).set({ ...values, version: cur.version + 1, updatedAt: new Date() }).where(eq(dailyMessages.date, date)).returning()
         : await tx.insert(dailyMessages).values({ date, ...values }).returning();

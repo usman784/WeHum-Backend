@@ -12,6 +12,7 @@ import { DRIZZLE, type DB } from '../../infra/core.module';
 import { CONTENT_ROLES, MANAGER_ROLES } from '../admin-auth/rbac';
 import { AdminWriter, assertVersion, CurrentActor, etag, type Actor } from '../admin/admin-writer';
 import { cursorQuery, IdParam } from '../admin/dto';
+import { ConfigService } from '../config/config.service';
 import { PushService, type Audience } from './push.service';
 
 const AUDIENCES = ['all', 'members', 'free', 'trial', 'guests', 'country', 'founding'] as const;
@@ -30,7 +31,7 @@ const IdP = new Zod(IdParam);
 
 @Injectable()
 export class NotificationsAdminService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB, private readonly writer: AdminWriter, private readonly push: PushService) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DB, private readonly writer: AdminWriter, private readonly push: PushService, private readonly config: ConfigService) {}
 
   async list(q: z.infer<typeof List>) {
     const rows = await this.db.select().from(notifications).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(Math.min(100, q.limit));
@@ -119,6 +120,17 @@ export class NotificationsAdminService {
     return { sent: true };
   }
 
+  /** Pushes per day from the delivery log: totals, what kind, how many people hit the daily cap. */
+  async delivery(days: number) {
+    const cap = (await this.config.get<{ maxPerDay: number }>('push')).value.maxPerDay ?? 2;
+    const rows = (await this.db.execute<{ d: string; key: string; sent: number; opened: number }>(sql`SELECT local_date::text AS d, key, count(*)::int AS sent, count(opened_at)::int AS opened FROM push_log WHERE local_date > (now() at time zone 'utc')::date - ${days}::int GROUP BY 1, 2 ORDER BY 1 DESC, 2`)).rows;
+    const perUser = (await this.db.execute<{ d: string; people: number; atCap: number; avg: number }>(sql`SELECT d, count(*)::int AS people, count(*) FILTER (WHERE n >= ${cap})::int AS "atCap", round(avg(n)::numeric, 2)::float8 AS avg FROM (SELECT local_date::text AS d, user_id, count(*) AS n FROM push_log WHERE local_date > (now() at time zone 'utc')::date - ${days}::int GROUP BY 1, 2) t GROUP BY d`)).rows;
+    const by = new Map<string, { date: string; sent: number; opened: number; people: number; atCap: number; avgPerPerson: number; keys: { key: string; sent: number; opened: number }[] }>();
+    for (const r of rows) { const d = by.get(r.d) ?? { date: r.d, sent: 0, opened: 0, people: 0, atCap: 0, avgPerPerson: 0, keys: [] }; d.sent += r.sent; d.opened += r.opened; d.keys.push({ key: r.key, sent: r.sent, opened: r.opened }); by.set(r.d, d); }
+    for (const p of perUser) { const d = by.get(p.d); if (d) { d.people = p.people; d.atCap = p.atCap; d.avgPerPerson = p.avg; } }
+    return { maxPerDay: cap, days: [...by.values()] };
+  }
+
   automatic() { return this.db.select().from(autoNotifications).orderBy(autoNotifications.key); }
 
   patchAutomatic(actor: Actor, key: string, b: z.infer<typeof AutoPatch>) {
@@ -139,6 +151,7 @@ export class NotificationsAdminController {
 
   @AdminRoles(...CONTENT_ROLES) @Get() list(@Query(new Zod(List)) q: z.infer<typeof List>) { return this.svc.list(q); }
   @AdminRoles(...CONTENT_ROLES) @Get('audience') audience(@Query(new Zod(AudienceQuery)) q: z.infer<typeof AudienceQuery>) { return this.svc.audience(q.audience, q.countries ? q.countries.split(',').filter(Boolean) : [], q.at); }
+  @AdminRoles(...CONTENT_ROLES) @Get('delivery') delivery(@Query(new Zod(z.object({ days: z.coerce.number().int().min(1).max(60).default(14) }))) q: { days: number }) { return this.svc.delivery(q.days); }
   @AdminRoles(...CONTENT_ROLES) @Get('automatic') automatic() { return this.svc.automatic(); }
   @AdminRoles(...MANAGER_ROLES) @Patch('automatic/:key') patchAuto(@CurrentActor() a: Actor, @Param('key') key: string, @Body(new Zod(AutoPatch)) b: z.infer<typeof AutoPatch>) { return this.svc.patchAutomatic(a, key, b); }
 

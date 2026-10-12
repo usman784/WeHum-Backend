@@ -44,6 +44,12 @@ export const challengeCounts = pgEnum('challenge_counts', ['any', 'sleep', 'grou
 export const users = pgTable('users', {
   id: uuid('id').primaryKey(),
   firstName: varchar('first_name', { length: 30 }),
+  lastName: varchar('last_name', { length: 30 }),
+  /** Public handle (3–20 of a-z 0-9 . _), unique ignoring case; changeable once per 7 days. */
+  username: citext('username').unique(),
+  usernameChangedAt: ts('username_changed_at'),
+  /** Storage key of an uploaded photo, or the absolute URL the social provider gave us. */
+  avatarUrl: text('avatar_url'),
   email: citext('email').unique(),
   emailVerifiedAt: ts('email_verified_at'),
   isGuest: boolean('is_guest').notNull().default(true),
@@ -346,6 +352,10 @@ export const dailyMessages = pgTable('daily_messages', {
   videoMediaId: uuid('video_media_id'),
   access: access('access').notNull().default('premium'),
   status: contentStatus('status').notNull().default('draft'),
+  /** Scheduled messages go live at this moment (or at 00:00 UTC of their day when empty). */
+  publishAt: ts('publish_at'),
+  /** Local time (HH:mm) of the push for this message; empty = each person's reminder time. */
+  pushTime: char('push_time', { length: 5 }),
   version: integer('version').notNull().default(1),
   updatedAt: updatedAt(),
 }, (t) => [

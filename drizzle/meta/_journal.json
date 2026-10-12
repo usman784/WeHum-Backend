@@ -57,6 +57,13 @@
       "when": 1791794821047,
       "tag": "0007_stitch",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791801000000,
+      "tag": "0008_profile_branding",
+      "breakpoints": true
     }
   ]
 }

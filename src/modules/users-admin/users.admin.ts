@@ -1,3 +1,4 @@
+import { env } from '../../config/env';
 import { Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
@@ -94,7 +95,7 @@ export class UsersAdminService {
     const [u] = (await this.db.execute<Record<string, any>>(sql`SELECT * FROM users WHERE id = ${id} AND deleted_at IS NULL`)).rows; // eslint-disable-line @typescript-eslint/no-explicit-any
     if (!u) throw new AppError('NOT_FOUND', 'User not found');
     const q = async (s: ReturnType<typeof sql>) => (await this.db.execute<Record<string, any>>(s)).rows; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const [ids, devs, stats, week, recent, dedications, ent, firstIdentity] = await Promise.all([
+    const [ids, devs, stats, week, recent, dedications, ent, firstIdentity, pushes] = await Promise.all([
       q(sql`SELECT provider::text, created_at FROM auth_identities WHERE user_id = ${id} ORDER BY created_at`),
       q(sql`SELECT platform::text, model, app_version, last_seen_at FROM devices WHERE user_id = ${id} ORDER BY last_seen_at DESC LIMIT 3`),
       q(sql`SELECT minutes_total, meditations_total, group_total, dedications_total, first_meditation_at, last_meditation_at FROM user_stats WHERE user_id = ${id}`),
@@ -103,6 +104,7 @@ export class UsersAdminService {
       q(sql`SELECT d.id, d.text, d.status::text, d.holding_count, d.created_at, s.title AS session FROM dedications d JOIN sessions s ON s.id = d.session_id WHERE d.user_id = ${id} ORDER BY d.created_at DESC LIMIT 10`),
       q(sql`SELECT active, product_id, period_type::text AS period_type, store::text AS store, started_at, expires_at, will_renew, billing_issue, is_founding FROM entitlements WHERE user_id = ${id}`),
       q(sql`SELECT created_at FROM auth_identities WHERE user_id = ${id} AND provider <> 'device' ORDER BY created_at LIMIT 1`),
+      q(sql`SELECT key, local_date::text AS d, sent_at, opened_at FROM push_log WHERE user_id = ${id} ORDER BY sent_at DESC LIMIT 30`),
     ]);
     const e = ent[0] ?? null;
     const days = await q(sql`SELECT local_date::text AS d, minutes FROM user_daily_stats WHERE user_id = ${id} AND meditations > 0 ORDER BY local_date`);
@@ -111,10 +113,11 @@ export class UsersAdminService {
     const st = stats[0] ?? { minutes_total: 0, meditations_total: 0, group_total: 0 };
     const saved = firstIdentity[0]?.created_at ? new Date(firstIdentity[0].created_at) : null;
     return {
-      id: u.id, name: u.first_name, email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
+      id: u.id, name: u.first_name, lastName: u.last_name, username: u.username, avatarUrl: u.avatar_url ? (/^https?:/.test(u.avatar_url) ? u.avatar_url : `${env.CDN_BASE_URL.replace(/\/$/, '')}/${u.avatar_url}`) : null, email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
       providers: [...new Set(ids.filter((i) => i.provider !== 'device').map((i) => i.provider))],
       streak: { current: streak.current, record: streak.record, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone }, heartRateReadings: hr,
       accountSavedAt: saved, wasGuestDays: saved ? Math.max(0, Math.round((saved.getTime() - new Date(u.created_at).getTime()) / 86_400_000)) : null,
+      pushes: pushes.map((p) => ({ key: p.key, date: p.d, sentAt: p.sent_at, openedAt: p.opened_at })),
       devices: devs.map((d) => ({ platform: d.platform, model: d.model, appVersion: d.app_version, lastSeenAt: d.last_seen_at })),
       reminder: { enabled: u.reminder_enabled, time: u.reminder_time, timezone: u.timezone, groupWarning: u.group_warning, dailyMessagePush: u.daily_message_push },
       stats: { weekDays: week[0]?.days ?? 0, weekMinutes: week[0]?.minutes ?? 0, meditations: st.meditations_total, minutes: st.minutes_total, groupMeditations: st.group_total, avgMinutes: st.meditations_total ? Math.round((st.minutes_total / st.meditations_total) * 10) / 10 : null },

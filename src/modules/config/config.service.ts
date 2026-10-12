@@ -3,7 +3,8 @@ import { eq, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { K, REDIS } from '../../infra/redis';
-import { appConfig } from '../../db/schema';
+import { env } from '../../config/env';
+import { appConfig, mediaAssets } from '../../db/schema';
 import { CONFIG_DEFAULTS } from '../../db/config-defaults';
 
 export interface MainConfig { minVersion: { ios: string; android: string }; latestVersion?: { ios: string; android: string }; storeUrls?: { ios: string; android: string }; maintenance: boolean; features: Record<string, boolean>; supportEmail: string; defaultReminderTime: string; languages: string[] }
@@ -13,6 +14,7 @@ export interface GroupConfig {
   cadence?: 'daily' | 'hourly'; hourly?: { fromHourUtc: number; toHourUtc: number; lengthMin: number };
   intentions?: string[]; focus?: { title: string; summary: string; quote: string; attribution: string }; doorsOpenSec?: number;
 }
+export interface BrandingConfig { appName: string; tagline: string; logoMediaId: string | null }
 export interface SilenceConfig { durations: number[]; cadence: { inhaleSec: number; exhaleSec: number }; extendMin: number }
 export interface CrisisLine { id: string; name: string; kind: string; description: string; actions: { type: 'call' | 'sms'; label: string; value: string }[] }
 export interface CrisisConfig {
@@ -26,6 +28,17 @@ export interface SitTimesConfig { blocks: { time: string; label: string }[] }
 @Injectable()
 export class ConfigService {
   constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis) {}
+
+  /** App name, tagline and logo URL (the logo is a ready image in the media library). Read by the app on launch and by the CMS shell. */
+  async branding(): Promise<{ appName: string; tagline: string; logoUrl: string | null; version: number }> {
+    const { value, version } = await this.get<BrandingConfig>('branding');
+    let logoUrl: string | null = null;
+    if (value.logoMediaId) {
+      const [m] = await this.db.select({ key: mediaAssets.storageKey, status: mediaAssets.status }).from(mediaAssets).where(eq(mediaAssets.id, value.logoMediaId));
+      if (m && m.status === 'ready') logoUrl = `${env.CDN_BASE_URL.replace(/\/$/, '')}/${m.key.replace(/^\//, '')}`;
+    }
+    return { appName: value.appName, tagline: value.tagline, logoUrl, version };
+  }
 
   async get<T = Record<string, unknown>>(key: string): Promise<{ value: T; version: number }> {
     const cached = await this.redis.get(K.config(key)).catch(() => null);
