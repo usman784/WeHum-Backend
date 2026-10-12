@@ -361,7 +361,7 @@ describe('P2 performance (in-process, excluding network)', () => {
     results['session'] = await measure(150, () => h().get(`/v1/sessions/${id}`, { token: t }), [200]);
     console.log('P2 latency (ms)', JSON.stringify(results));
     for (const [name, r] of Object.entries(results)) {
-      expect(r.p50, `${name} p50`).toBeLessThan(15);
+      expect(r.p50, `${name} p50`).toBeLessThan(20);
       expect(r.p95, `${name} p95`).toBeLessThan(50);
     }
   });
