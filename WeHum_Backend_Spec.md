@@ -25,6 +25,8 @@
 
 ---
 
+> **Oct 12 update — Stitch redesign.** The client's Stitch project (31 screens) and the 7-sprint roadmap replace parts of the Oct 5 notes. §1.2 lists what changed (streaks with a grace day, 30-second preview, "sit" wording, hourly sits, optional heart-rate shift, live challenges). §4.5, §5.6, §7.6 and §14b add the schema, endpoints, events and phases. The screen-by-screen map is `../stitch-export/SCREEN_MAP.md`.
+
 ## 1. Product context
 
 **WeHum** is a meditation app by Raphael Reiter. Core promise: *you never meditate alone*.
@@ -51,22 +53,28 @@
 | Admin | Separate `admin_users` table, roles owner/admin/editor/moderator, mandatory 2FA |
 
 ### 1.2 Client rules the backend enforces
-- **Wording.** All copy says "meditation", "meditate" or "meditating". Never "sit".
-- **Progress, not streaks.** There are no streak, grace-day or rest-day fields anywhere. Progress = minutes, meditations and days this week.
-- **No previews.** There are no 30-second preview URLs.
-- **Silence Room, MOTD and dedications.**
-  - The Silence Room, MOTD audio, daily messages, Build your own, SoS, downloads and the group meditation are **premium**.
+
+**Current rules (Oct 12, Stitch + roadmap).** They replace the Oct 5 rules marked ~~struck~~ below.
+- **Wording.** Copy says "sit / sitting / sat" on the screens the Stitch design covers ("meditation" stays as the noun for content). The API field names do not change.
+- **Forgiving streaks.** `streak = { current, record, graceLeft, weeklyGoal }`, computed from `user_daily_stats` (no counter to drift):
+  - a day is *active* when it has a counted meditation (local date);
+  - one **grace day per ISO week**: the first missed day of a week is "rest" and keeps the run; a second missed day in the same week resets `current` to 0;
+  - today is never a miss while it is still running;
+  - `record` is the longest run ever. `weeklyGoal` is 1–7 (default 5, `PATCH /v1/me`).
+- **30-second preview.** A free user may preview a locked premium audio meditation for 30 s through `POST /v1/media/preview-url`: a short signed URL for the preview clip (30 s clip rendition when present, otherwise the first 30 s are enforced by `Range`/`previewSec`). Limit: 10 previews per user per day. The full file never leaves `play-url`'s premium gate.
+- **Silence Room, MOTD and dedications** (unchanged).
+  - The Silence Room, MOTD audio, daily messages, Build your own, SoS, downloads and the group sit are **premium**; some daily messages are marked `access = free`.
   - Free users can **read** dedications.
-  - Posting a dedication needs a **member with an account**, and only **after a finished meditation**. Limit: 3 per day. No links.
-- **Free and premium items.**
-  - Free items are "Free for you" items: Raphael's online library, YouTube-hosted. The word "YouTube" is never shown to users.
-  - Premium items carry the `access = premium` flag.
-- **Empty-room rule.** If live total < `emptyRoomThreshold` (default 10), the API returns `quiet: true` and the "meditated today" count instead of "meditating now".
-- **Pricing.**
-  - Products: `wehum_annual_founding` $59/yr (Founding 1,000 cap), `wehum_annual` $79/yr, `wehum_monthly` $9.99/mo, all with a 7-day trial.
-  - Prices always come from RevenueCat or the stores. The backend never sends a price for display.
-- **Coming soon (feature flags).** Challenges, Gratitude feed, Breathwork, Milestones, Intent.
+  - Posting a dedication needs a **member with an account**, and only **after a finished sit**. Limit: 3 per day. No links. The poster chooses whether the place shows (`locationMode: city | worldwide`).
+- **Free and premium items** (unchanged). Free items are "Free for you"; the word "YouTube" is never shown to users.
+- **Empty-room rule** (unchanged). If live total < `emptyRoomThreshold` (default 10), the API returns `quiet: true` and the "sat today" count.
+- **Honest presence.** No synthetic sitters, no rounding up. Region belts are aggregated from country codes; no coordinates, no per-user presence.
+- **Heart rate is optional and device-side.** The server stores at most `hrDeltaBpm` and `hrAvgBpm` per meditation, only when the app sends them (flag `features.heartRate`). No waveform, no raw samples.
+- **Pricing** (unchanged). Products: `wehum_annual_founding` $59/yr (Founding 1,000 cap), `wehum_annual` $79/yr, `wehum_monthly` $9.99/mo, all with a 7-day trial; day-5 reminder (push + email). Prices always come from RevenueCat or the stores.
+- **Feature flags.** `challenges` (now live), `gratitude`, `breathwork`, `milestones`, `streaks`, `hourlySits`, `heartRate`. `intent` stays off: the intent step and the 3-minute first sit are not built.
 - **Out of V1.** Profiles, friends, chat.
+
+~~Never "sit"~~ · ~~No streaks / grace / rest-day fields~~ · ~~No 30-second previews~~ — superseded by the list above.
 
 ---
 
@@ -284,6 +292,46 @@ Every `PUT` increments `version`, writes the audit log and emits `config:changed
 - **`analytics_events`:** 13-month retention (drop old partitions).
 - **`refresh_tokens`:** expired rows are purged nightly.
 
+### 4.5 Stitch additions (migration `0007_stitch`)
+| Change | Detail |
+|---|---|
+| `users.weekly_goal` | smallint 1–7, default 5 |
+| `users.city` | varchar(60) null. Coarse place for dedications, taken from the IANA time zone city (`Europe/London` → London); never GPS |
+| `meditations.hr_delta_bpm`, `hr_avg_bpm` | smallint null; sent by the app only when the user connected Health |
+| `sessions.phases` | jsonb `[{atSec, title}]` (player "Phase 2 · Anchoring breath, part 2/3") |
+| `sessions.preview_media_id` | uuid null: 30 s clip rendition |
+| `daily_messages.transcript` | jsonb `[{t, text, section?}]` (timed lines) |
+| `daily_messages.video_media_id`, `.access` | optional video file; `free`/`premium` (default premium) |
+| `saved_messages` | `(user_id, date)` PK: "Save to notes" |
+| `sound_blocks.bell_role` | `opening` / `interval` / `closing` for `kind = 'bell'` |
+| `dedications.place`, `.author_kind` | place label ("London, UK") or null; `user` / `teacher` (posted by Raphael from the CMS) |
+| `session_kudos` | `(user_id, session_id, local_date)` PK: "Send kudos to all" |
+| `group_intentions` | `(user_id, starts_at)` PK + `intention`: chosen intention for a sit |
+| `challenges.blurb`, `.lead_teacher_id`, `.badge_name`, `.grace_days`, `.unlock_time`, `.schedule` | cohort sprint content; `schedule` is jsonb `[{day, title, minutes, summary}]`; `unlock_time` is local `HH:MM` |
+| `challenge_participants.graces_used` | smallint |
+| `app_config` keys | `group` gains `cadence`, `hourly`, `intentions`, `focus`; new `silence`, `crisis`, `sitTimes`, `downloads` (below) |
+
+```jsonc
+// key = "group" (added fields)
+{ "cadence": "daily" | "hourly", "hourly": { "fromHourUtc": 6, "toHourUtc": 22, "lengthMin": 15 },
+  "intentions": ["Calm under pressure", "Deep physical release", "Mindful stillness"],
+  "focus": { "title": "The Midday Coherence Sit", "summary": "Breath anchoring & settling", "quote": "Equalize inhale and exhale.", "attribution": "Raphael" },
+  "doorsOpenSec": 60 }
+// key = "silence"
+{ "durations": [5, 10, 15, 20, 30, 45, 60, 0], "cadence": { "inhaleSec": 4, "exhaleSec": 6 }, "extendMin": 5 }
+// key = "crisis"
+{ "regions": [ { "code": "US", "name": "United States & Canada", "countries": ["US", "CA"],
+    "lines": [ { "id": "988", "name": "988 Suicide & Crisis Lifeline", "kind": "Voice & SMS", "description": "…",
+                 "actions": [ { "type": "call", "label": "Call 988", "value": "988" }, { "type": "sms", "label": "Text 988", "value": "988" } ] } ] } ],
+  "international": [ { "country": "United Kingdom", "line": "NHS 111 · Samaritans 116 123", "value": "111" } ],
+  "tip": "While waiting for a responder, place both feet flat on the floor…", "defaultRegion": "US" }
+// key = "sitTimes"   (suggested blocks on the sit-time screen)
+{ "blocks": [ { "time": "06:30", "label": "Dawn Stillness" }, { "time": "07:00", "label": "Morning Prime" },
+              { "time": "12:30", "label": "Midday Reset" }, { "time": "21:00", "label": "Night Decompress" } ] }
+// key = "downloads"
+{ "quotaMb": 2400 }
+```
+
 ---
 
 ## 5. REST API
@@ -492,6 +540,42 @@ Auth column:
                   "canDedicate": true, "dedicationsLeftToday": 3,
                   "together": { "people": 412, "countries": 37 } } }
 ```
+
+### 5.6 Stitch additions (app)
+| Method | Path | Auth | Purpose | Notes |
+|---|---|---|---|---|
+| `GET` | `/v1/today` | device | **adds** `streak`, `presence { regions, silenceNow }`, `continueLast`, `dailyMessage.durationSec` | `streak.week[]` has `state: done\|rest\|today\|upcoming` for the M–S strip |
+| `PATCH` | `/v1/me` | device | **adds** `weeklyGoal` (1–7) | |
+| `GET` | `/v1/me/progress` | device | **adds** `streak`, `lifetime { sits, minutes, together, togetherPct, avgMin, hrShiftBpm }`, `byDay[].state` | `hrShiftBpm` null without data |
+| `POST` | `/v1/meditations` | device | **adds** request `hrDeltaBpm?`, `hrAvgBpm?`; response `streak { current, record, extended, graceUsed }`, `finishers { completed }`, `regions[]`, `collectiveMinutes` | |
+| `POST` | `/v1/sessions/{id}/kudos` | device | Send kudos to the people who finished | once per user, session and local date |
+| `GET` | `/v1/library/summary` | device | Library header numbers | `{ sittingNow, regions, disciplines[{id, tracks, sitsToday}], topToday[{sessionId, completedToday}] }`; cached 30 s |
+| `POST` | `/v1/media/preview-url` | device | 30 s preview for a locked premium meditation | free users only; `{ url, previewSec: 30, expiresAt }`; 403 `PREVIEW_NOT_AVAILABLE` for video/youtube |
+| `GET` | `/v1/silence` | member | Silence Room setup | `{ sittingNow, quiet, regions, todayTotal, todayZones, durations, cadence, bells { opening, interval, closing } }` |
+| `GET` | `/v1/group/next` | device | **adds** `cadence`, `waitingByRegion`, `intentions`, `focus`, `doorsOpenSec`, `myIntention` | hourly mode returns the next top-of-hour in the window |
+| `PUT` | `/v1/group/intention` | member | Save the intention for a sit | `{ startsAt, intention }` (one of `intentions`) |
+| `GET` | `/v1/daily-messages/{date}` | member | **adds** `transcript[]`, `videoUrl`, `access`, `saved`, `listenersToday`, `week[]` | |
+| `GET` | `/v1/daily-messages` | device | **adds** per item `durationSec`, `access`, `locked` | free users see the list, premium items `locked: true` |
+| `PUT`/`DELETE` | `/v1/daily-messages/{date}/save` | member | Save / unsave to notes | |
+| `GET` | `/v1/live/world` | device | World gauge | `{ total, countries, vibration, trendPct, minutesToday, regions[{key, name, sittingNow, minutesToday, syncShare}], belts[{country, sittingNow, minutesToday, syncShare}] }` |
+| `GET` | `/v1/sos` | device | **adds** per tile `durationMin`; `soundBeds[]` | |
+| `GET` | `/v1/sos/directory` | device | Crisis directory for a region | `?country=US` (default from `me.country`, then `crisis.defaultRegion`) |
+| `POST` | `/v1/me/dedications/anonymize` | account | Replace the name and place on all my past dedications | `{ count }` |
+| `GET` | `/v1/community/feed` | device | Recent dedications across sits | cursor; excludes blocked users; teacher posts carry `author: { kind: "teacher" }` |
+| `GET` | `/v1/community/members-at` | device | How many members sit in a time block | `?time=07:00` → `{ count }` (reminder times within the same hour; real count) |
+| `POST` | `/v1/dedications` | member+account | **adds** `locationMode` | `place` stored from `users.city` + country, or null |
+| `GET` | `/v1/challenges/{id}` | device | Cohort sprint detail | `{ lead, blurb, days, graceDays, graceLeft, badge, cohort { active, regions[] }, schedule[{day, title, minutes, summary, state, unlocksAt}], progress { completedDays, days, pct, remaining }, joined }` |
+
+**Admin (CMS) additions**
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `PUT` | `/v1/admin/config/{key}` | owner, admin | now accepts `silence`, `crisis`, `sitTimes`, `downloads` (zod-validated shapes in §4.5) |
+| `PATCH` | `/v1/admin/sessions/{id}` | editors | `phases[]`, `previewMediaId` |
+| `PUT` | `/v1/admin/daily-messages/{date}` | editors | `transcript[]`, `videoMediaId`, `access` |
+| `PATCH` | `/v1/admin/sound-blocks/{id}` | editors | `bellRole` |
+| `POST`/`PATCH` | `/v1/admin/challenges` | editors | cohort fields (§4.5) |
+| `POST` | `/v1/admin/dedications/teacher` | owner, admin, editor | Post as Raphael (`author_kind = teacher`) |
+| `GET` | `/v1/admin/streaks/summary` | owner, admin, editor | users with a current run ≥ 7, median record (read-only) |
 
 ### 5.5 Admin endpoints (CMS)
 Auth column = roles allowed. `editor(read)` = GET only.
@@ -730,6 +814,13 @@ URL `wss://api.wehum.app`, path `/socket.io`, **transports: websocket only**. Tw
 | S→C | `config:changed` | `{ key, version }` | app refetches `/v1/bootstrap` |
 | S→C | `catalog:changed` | `{ version }` | app refetches catalog in background (debounced 10 s) |
 | S→C | `force:logout` | `{ reason }` | token version bumped / account deleted |
+
+### 7.6 Stitch additions (`/live`)
+| Direction | Event | Payload | Notes |
+|---|---|---|---|
+| S→C | `silence:live` | `{ people, regions: {americas, emea, apac}, at }` | every 5 s to room `silence` (Silence Room setup + dimmed run) |
+| S→C | `lobby:state` | **adds** `byRegion {americas, emea, apac}`, `intentions { "<text>": n }` | every 2 s |
+| C→S | `room:join` | **adds** `"silence"` | |
 
 ### 7.3 `/admin` namespace (CMS)
 | Direction | Event | Payload | Rooms |
@@ -1018,6 +1109,17 @@ Coverage target: services ≥ 85 % lines; all endpoints have at least one e2e te
 | **P9 Analytics & admin data** | Analytics events ingest, rollups, dashboard, analytics/funnel/retention, users search/detail/export/delete cascade | rollup math tests; delete cascade verified (DB + S3 + RC mock) |
 | **P10 Hardening** | k6 load (§6.3), caching review, slow-query review, alerts, WAF, attestation (App Attest/Play Integrity on guest create), backups + restore drill, runbooks | all budgets met; restore drill done; alerts fire in staging |
 | **P11 Coming soon** | Challenges participation, gratitude feed, breathwork content, milestones | flag on/off tests |
+
+### 14b. Stitch phases (Oct 12 → store release; order = `roadmap/wehum-roadmap.html`)
+| Phase | Sprint | Backend scope | Exit tests |
+|---|---|---|---|
+| **S1 Onboarding & Home** | 19–30 Oct | migration `0007`, streak engine, `/today` extras (streak, regions, silenceNow, continueLast), `weeklyGoal`, `members-at`, `sitTimes` config | streak rules (grace, week reset, DST, offline backfill), today payload |
+| **S2 Libraries** | 2–6 Nov | `/library/summary`, `phases`, preview clip + `preview-url`, `downloads` config, `sizeMb` in catalog | preview limits, free vs member, catalog snapshot |
+| **S3 Rooms** | 9–20 Nov | `/silence`, `silence:live`, hourly sits + intention + regional lobby, transcript + save, payoff extras, kudos | hourly schedule across DST, lobby by region, kudos once |
+| **S4 Location & paywall** | 23–27 Nov | `/live/world`, `crisis` config + `/sos/directory`, anonymize dedications, SoS durations/beds | region mapping, directory fallbacks |
+| **S5 Custom & Together** | 30 Nov–4 Dec | `community/feed`, `locationMode`, teacher posts | feed filters, place privacy |
+| **S6 CMS** | 7–11 Dec | admin fields for everything above (CMS spec) | role matrix |
+| **S7 Streaks & analytics** | 14–18 Dec | challenge detail + schedule, lifetime stats, heart-rate fields, analytics events (`streak_*`, `preview_*`, `kudos_sent`) | challenge unlock/grace, export includes new data |
 
 ---
 

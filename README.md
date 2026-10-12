@@ -35,3 +35,6 @@ src/
 drizzle/               SQL migrations
 test/                  e2e tests (real Postgres + Redis)
 ```
+
+## Oct 12 — Stitch redesign
+Migration `0007_stitch` and the new endpoints are described in `WeHum_Backend_Spec.md` §4.5, §5.6, §7.6 and §14b. Build map: `../stitch-export/SCREEN_MAP.md`.
