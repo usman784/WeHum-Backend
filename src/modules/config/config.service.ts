@@ -8,7 +8,19 @@ import { CONFIG_DEFAULTS } from '../../db/config-defaults';
 
 export interface MainConfig { minVersion: { ios: string; android: string }; latestVersion?: { ios: string; android: string }; storeUrls?: { ios: string; android: string }; maintenance: boolean; features: Record<string, boolean>; supportEmail: string; defaultReminderTime: string; languages: string[] }
 export interface TodayConfig { emptyRoomThreshold: number; freeHomePick: 'random' | 'newest'; showDailyMessage: boolean; sections: Record<string, boolean> }
-export interface GroupConfig { startUtc: string; lengthMin: number; lobbyOpenMin: number; reminderMin: number }
+export interface GroupConfig {
+  startUtc: string; lengthMin: number; lobbyOpenMin: number; reminderMin: number;
+  cadence?: 'daily' | 'hourly'; hourly?: { fromHourUtc: number; toHourUtc: number; lengthMin: number };
+  intentions?: string[]; focus?: { title: string; summary: string; quote: string; attribution: string }; doorsOpenSec?: number;
+}
+export interface SilenceConfig { durations: number[]; cadence: { inhaleSec: number; exhaleSec: number }; extendMin: number }
+export interface CrisisLine { id: string; name: string; kind: string; description: string; actions: { type: 'call' | 'sms'; label: string; value: string }[] }
+export interface CrisisConfig {
+  defaultRegion: string; tip: string;
+  regions: { code: string; name: string; countries: string[]; lines: CrisisLine[] }[];
+  international: { country: string; line: string; value: string }[];
+}
+export interface SitTimesConfig { blocks: { time: string; label: string }[] }
 
 /** app_config read-through cache (Redis, invalidated on write). Spec §4.2. */
 @Injectable()

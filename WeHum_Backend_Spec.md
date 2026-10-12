@@ -299,7 +299,7 @@ Every `PUT` increments `version`, writes the audit log and emits `config:changed
 | `users.city` | varchar(60) null. Coarse place for dedications, taken from the IANA time zone city (`Europe/London` → London); never GPS |
 | `meditations.hr_delta_bpm`, `hr_avg_bpm` | smallint null; sent by the app only when the user connected Health |
 | `sessions.phases` | jsonb `[{atSec, title}]` (player "Phase 2 · Anchoring breath, part 2/3") |
-| `sessions.preview_media_id` | uuid null: 30 s clip rendition |
+| `media_assets.preview_key` | text null: the 30 s preview clip of an audio file, made by the media worker (and on demand from the CMS) |
 | `daily_messages.transcript` | jsonb `[{t, text, section?}]` (timed lines) |
 | `daily_messages.video_media_id`, `.access` | optional video file; `free`/`premium` (default premium) |
 | `saved_messages` | `(user_id, date)` PK: "Save to notes" |
@@ -313,7 +313,7 @@ Every `PUT` increments `version`, writes the audit log and emits `config:changed
 
 ```jsonc
 // key = "group" (added fields)
-{ "cadence": "daily" | "hourly", "hourly": { "fromHourUtc": 6, "toHourUtc": 22, "lengthMin": 15 },
+{ "cadence": "daily" | "hourly", "hourly": { "fromHourUtc": 6, "toHourUtc": 22, "lengthMin": 10 },   // lengthMin ∈ {10, 30, 45}: the sit plays that MOTD length
   "intentions": ["Calm under pressure", "Deep physical release", "Mindful stillness"],
   "focus": { "title": "The Midday Coherence Sit", "summary": "Breath anchoring & settling", "quote": "Equalize inhale and exhale.", "attribution": "Raphael" },
   "doorsOpenSec": 60 }
@@ -544,20 +544,21 @@ Auth column:
 ### 5.6 Stitch additions (app)
 | Method | Path | Auth | Purpose | Notes |
 |---|---|---|---|---|
-| `GET` | `/v1/today` | device | **adds** `streak`, `presence { regions, silenceNow }`, `continueLast`, `dailyMessage.durationSec` | `streak.week[]` has `state: done\|rest\|today\|upcoming` for the M–S strip |
+| `GET` | `/v1/today` | device | **adds** `streak` (as in progress), `presence { belts { americas, emea, apac }, silenceNow }`, `continueLast { sessionId, title, positionSec, leftSec }`, `dailyMessage.durationSec` | belts group live people by country code; `continueLast` = unfinished catalog sit of the last 3 days |
 | `PATCH` | `/v1/me` | device | **adds** `weeklyGoal` (1–7) | |
-| `GET` | `/v1/me/progress` | device | **adds** `streak`, `lifetime { sits, minutes, together, togetherPct, avgMin, hrShiftBpm }`, `byDay[].state` | `hrShiftBpm` null without data |
-| `POST` | `/v1/meditations` | device | **adds** request `hrDeltaBpm?`, `hrAvgBpm?`; response `streak { current, record, extended, graceUsed }`, `finishers { completed }`, `regions[]`, `collectiveMinutes` | |
+| `GET` | `/v1/me/progress` | device | **adds** `streak { current, record, graceLeft, graceDays, weeklyGoal, goalDaysDone, daysToGoal, doneToday, week[{date, label, state, minutes}] }`, `lifetime { sits, minutes, together, togetherPct, avgMin, hrShiftBpm }` | `state`: done / rest / today / upcoming / missed; `hrShiftBpm` null without data; `streak` null when `features.streaks` is off |
+| `POST` | `/v1/meditations` | device | **adds** request `hrDeltaBpm?`, `hrAvgBpm?`; response `streak { current, record, extended, graceLeft, weeklyGoal, goalDaysDone, daysToGoal }`, `finishers { completed }`, `together { …, belts, top[], minutesToday }`, `heartRate` | `extended` = this sit made today active |
 | `POST` | `/v1/sessions/{id}/kudos` | device | Send kudos to the people who finished | once per user, session and local date |
 | `GET` | `/v1/library/summary` | device | Library header numbers | `{ sittingNow, regions, disciplines[{id, tracks, sitsToday}], topToday[{sessionId, completedToday}] }`; cached 30 s |
 | `POST` | `/v1/media/preview-url` | device | 30 s preview for a locked premium meditation | free users only; `{ url, previewSec: 30, expiresAt }`; 403 `PREVIEW_NOT_AVAILABLE` for video/youtube |
-| `GET` | `/v1/silence` | member | Silence Room setup | `{ sittingNow, quiet, regions, todayTotal, todayZones, durations, cadence, bells { opening, interval, closing } }` |
+| `GET` | `/v1/silence` | device | Silence Room setup (starting a sit is premium) | `{ sittingNow, quiet, regions, todayTotal, todayZones, durations, cadence, bells { opening, interval, closing } }` |
 | `GET` | `/v1/group/next` | device | **adds** `cadence`, `waitingByRegion`, `intentions`, `focus`, `doorsOpenSec`, `myIntention` | hourly mode returns the next top-of-hour in the window |
-| `PUT` | `/v1/group/intention` | member | Save the intention for a sit | `{ startsAt, intention }` (one of `intentions`) |
-| `GET` | `/v1/daily-messages/{date}` | member | **adds** `transcript[]`, `videoUrl`, `access`, `saved`, `listenersToday`, `week[]` | |
+| `PUT` | `/v1/group/intention` | device | Save the intention for a sit | `{ slot, intention }` (`slot` = the `date` field of `/group/next`; `intention` one of the configured options) |
+| `GET` | `/v1/daily-messages/{date}` | device | **adds** `transcript[]`, `hasVideo`, `access`, `saved`, `listenersToday`, `week[]` | free messages open to everyone, premium → 403 `PREMIUM_REQUIRED` for free users; media via `play-url {kind:"daily_message", date, video?}` |
+| `POST` | `/v1/daily-messages/{date}/complete` | device | Count this person once in `listenersToday` | |
 | `GET` | `/v1/daily-messages` | device | **adds** per item `durationSec`, `access`, `locked` | free users see the list, premium items `locked: true` |
-| `PUT`/`DELETE` | `/v1/daily-messages/{date}/save` | member | Save / unsave to notes | |
-| `GET` | `/v1/live/world` | device | World gauge | `{ total, countries, vibration, trendPct, minutesToday, regions[{key, name, sittingNow, minutesToday, syncShare}], belts[{country, sittingNow, minutesToday, syncShare}] }` |
+| `PUT`/`DELETE` | `/v1/daily-messages/{date}/save` | device | Save / unsave to notes | |
+| `GET` | `/v1/live/world` | device | World gauge | `{ total, countries, vibration, quiet, minutesToday, trendPct, regions[{key, name, sittingNow, minutesToday, syncShare}], belts[{country, name, sittingNow, minutesToday, syncShare}] }`. `syncShare` = share of people sitting now in a group sit; `trendPct` = minutes so far today vs the same period yesterday (null without a baseline); belts = top 12 countries |
 | `GET` | `/v1/sos` | device | **adds** per tile `durationMin`; `soundBeds[]` | |
 | `GET` | `/v1/sos/directory` | device | Crisis directory for a region | `?country=US` (default from `me.country`, then `crisis.defaultRegion`) |
 | `POST` | `/v1/me/dedications/anonymize` | account | Replace the name and place on all my past dedications | `{ count }` |
@@ -574,8 +575,10 @@ Auth column:
 | `PUT` | `/v1/admin/daily-messages/{date}` | editors | `transcript[]`, `videoMediaId`, `access` |
 | `PATCH` | `/v1/admin/sound-blocks/{id}` | editors | `bellRole` |
 | `POST`/`PATCH` | `/v1/admin/challenges` | editors | cohort fields (§4.5) |
-| `POST` | `/v1/admin/dedications/teacher` | owner, admin, editor | Post as Raphael (`author_kind = teacher`) |
-| `GET` | `/v1/admin/streaks/summary` | owner, admin, editor | users with a current run ≥ 7, median record (read-only) |
+| `POST` | `/v1/admin/dedications/teacher` | owner, admin, moderator | Post as Raphael (`author_kind = teacher`) |
+| `POST` | `/v1/admin/media/{id}/preview` | editors | (Re)make the 30 s preview clip of a processed audio file (job) |
+| `GET` | `/v1/admin/users/{id}` | editors | **adds** `streak { current, record, graceLeft, weeklyGoal, goalDaysDone }`, `heartRateReadings` |
+| — | dashboard KPIs | admin | **adds** `silenceNow`, `streaks7` (people who sat on each of the last 7 days) |
 
 ### 5.5 Admin endpoints (CMS)
 Auth column = roles allowed. `editor(read)` = GET only.
@@ -878,6 +881,7 @@ motd:{date}:users    SET userIds who practiced (counted meditation) — exact co
 ## 8. Services & jobs
 
 ### 8.1 Group meditation
+- **Slots (Stitch).** A lobby, a `group:start` and a reminder are identified by a *slot*: the date (`2026-10-12`) for the daily sit or the date and UTC hour (`2026-10-12T08`) for an hourly sit. `GET /v1/group/next` returns the slot in `date`; every room, lobby and `group:start` payload uses it. Hourly sits warn only the people who tapped "Remind me" for that slot.
 - **Config:** `app_config.group.startUtc`, `lengthMin`, `lobbyOpenMin`, `reminderMin`. A per-date override comes from `motd_days.group_start_utc` / `group_length_min`.
 - **Scheduler, every minute.** It finds groups that start within 15 min and creates a BullMQ **delayed job** `group:start:{date}` at the exact T0, plus `group:warn:{date}` at T0 − `reminderMin`.
 - **At T0:**

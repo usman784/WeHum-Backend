@@ -7,7 +7,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint, bigserial, boolean, char, check, customType, date, index, inet, integer, jsonb, numeric,
-  pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar,
+  pgEnum, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, uuid, varchar,
 } from 'drizzle-orm/pg-core';
 
 const citext = customType<{ data: string }>({ dataType: () => 'citext' });
@@ -56,6 +56,8 @@ export const users = pgTable('users', {
   groupWarning: boolean('group_warning').notNull().default(false),
   dailyMessagePush: boolean('daily_message_push').notNull().default(true),
   showCountry: boolean('show_country').notNull().default(true),
+  /** Stitch: weekly sit goal (1–7 days) shown on the streak strip. */
+  weeklyGoal: smallint('weekly_goal').notNull().default(5),
   mutedAt: ts('muted_at'),
   tokenVersion: integer('token_version').notNull().default(0),
   createdAt: createdAt(),
@@ -164,6 +166,8 @@ export const mediaAssets = pgTable('media_assets', {
   height: integer('height'),
   blurhash: varchar('blurhash', { length: 64 }),
   hlsKey: text('hls_key'),
+  /** 30-second preview clip of an audio file (Stitch preview sheet). */
+  previewKey: text('preview_key'),
   status: mediaStatus('status').notNull().default('uploading'),
   error: text('error'),
   createdBy: uuid('created_by'),
@@ -225,6 +229,8 @@ export const sessions = pgTable('sessions', {
   sosFeeling: varchar('sos_feeling', { length: 40 }),
   sosSubtitle: varchar('sos_subtitle', { length: 80 }),
   sosOrder: integer('sos_order'),
+  /** Chapters shown in the player: `[{ atSec, title }]`. */
+  phases: jsonb('phases').notNull().default(sql`'[]'::jsonb`),
   status: contentStatus('status').notNull().default('draft'),
   publishAt: ts('publish_at'),
   plays: integer('plays').notNull().default(0),
@@ -284,6 +290,15 @@ export const challenges = pgTable('challenges', {
   showOnYou: boolean('show_on_you').notNull().default(true),
   coverMediaId: uuid('cover_media_id'),
   startsAt: ts('starts_at'),
+  /** Cohort sprint content (Stitch challenge detail). */
+  blurb: text('blurb'),
+  leadTeacherId: uuid('lead_teacher_id'),
+  badgeName: varchar('badge_name', { length: 60 }),
+  graceDays: smallint('grace_days').notNull().default(1),
+  /** Local time each day unlocks, `HH:mm`. */
+  unlockTime: char('unlock_time', { length: 5 }).notNull().default('07:00'),
+  /** `[{ day, title, minutes, summary }]` */
+  schedule: jsonb('schedule').notNull().default(sql`'[]'::jsonb`),
   status: contentStatus('status').notNull().default('draft'),
   version: integer('version').notNull().default(1),
   createdAt: createdAt(),
@@ -326,6 +341,10 @@ export const dailyMessages = pgTable('daily_messages', {
   imageMediaId: uuid('image_media_id'),
   durationSec: integer('duration_sec'),
   themeTag: varchar('theme_tag', { length: 40 }),
+  /** Timed lines: `[{ t (sec), text, section? }]`. */
+  transcript: jsonb('transcript').notNull().default(sql`'[]'::jsonb`),
+  videoMediaId: uuid('video_media_id'),
+  access: access('access').notNull().default('premium'),
   status: contentStatus('status').notNull().default('draft'),
   version: integer('version').notNull().default(1),
   updatedAt: updatedAt(),
@@ -343,6 +362,8 @@ export const soundBlocks = pgTable('sound_blocks', {
   durationSec: integer('duration_sec').notNull(),
   loopable: boolean('loopable').notNull().default(false),
   loudnessLufs: numeric('loudness_lufs', { precision: 5, scale: 2 }),
+  /** For `kind = 'bell'`: where the Silence Room offers it. */
+  bellRole: varchar('bell_role', { length: 10 }),
   access: access('access').notNull().default('premium'),
   order: integer('order').notNull().default(0),
   visible: boolean('visible').notNull().default(true),
@@ -366,6 +387,9 @@ export const meditations = pgTable('meditations', {
   offline: boolean('offline').notNull().default(false),
   localDate: date('local_date').notNull(),
   country: char('country', { length: 2 }),
+  /** Optional, from Apple Health / Health Connect on the phone (Stitch payoff). */
+  hrDeltaBpm: smallint('hr_delta_bpm'),
+  hrAvgBpm: smallint('hr_avg_bpm'),
   createdAt: createdAt(),
 }, (t) => [
   index('meditations_user_started_idx').on(t.userId, t.startedAt.desc()),
@@ -397,6 +421,9 @@ export const dedications = pgTable('dedications', {
   meditationId: uuid('meditation_id').notNull().unique(),
   firstName: varchar('first_name', { length: 30 }).notNull(),
   country: char('country', { length: 2 }),
+  /** "London, UK" when the poster chose to show the place. */
+  place: varchar('place', { length: 80 }),
+  authorKind: varchar('author_kind', { length: 10 }).notNull().default('user'),
   text: varchar('text', { length: 200 }).notNull(),
   status: dedicationStatus('status').notNull().default('visible'),
   autoFlags: text('auto_flags').array().notNull().default(sql`'{}'::text[]`),
@@ -416,6 +443,26 @@ export const dedicationHolds = pgTable('dedication_holds', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: createdAt(),
 }, (t) => [primaryKey({ columns: [t.dedicationId, t.userId] })]);
+
+export const sessionKudos = pgTable('session_kudos', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  localDate: date('local_date').notNull(),
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.userId, t.sessionId, t.localDate] }), index('session_kudos_session_date_idx').on(t.sessionId, t.localDate)]);
+
+export const groupIntentions = pgTable('group_intentions', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  startsAt: ts('starts_at').notNull(),
+  intention: varchar('intention', { length: 60 }).notNull(),
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.userId, t.startsAt] }), index('group_intentions_starts_idx').on(t.startsAt)]);
+
+export const savedMessages = pgTable('saved_messages', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  date: date('date').notNull(),
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.userId, t.date] })]);
 
 export const reports = pgTable('reports', {
   id: uuid('id').primaryKey(),

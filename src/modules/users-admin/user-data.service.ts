@@ -10,6 +10,7 @@ import { S3Service } from '../../infra/s3';
 import { RevenueCatClient } from '../subscriptions/revenuecat.client';
 import { PushTransport } from '../push/push.transport';
 import { Mailer } from '../../infra/mailer';
+import { zipStore } from '../../common/zip';
 
 const csvCell = (v: unknown) => { const s = v === null || v === undefined ? '' : v instanceof Date ? v.toISOString() : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 export const toCsv = (rows: Record<string, unknown>[]) => { const head = rows[0] ? Object.keys(rows[0]) : []; return [head.join(','), ...rows.map((r) => head.map((h) => csvCell(r[h])).join(','))].join('\n') + '\n'; };
@@ -38,16 +39,16 @@ export class UserDataService {
     await this.progress(jobId, { status: 'running', progress: 10 });
     try {
       const q = async (s: ReturnType<typeof sql>) => (await this.db.execute<Record<string, unknown>>(s)).rows;
-      const [u] = await q(sql`SELECT id, first_name, email, is_guest, country, timezone, locale, theme::text, reminder_enabled, reminder_time, group_warning, daily_message_push, show_country, muted_at, created_at, last_active_at FROM users WHERE id = ${userId}`);
+      const [u] = await q(sql`SELECT id, first_name, email, is_guest, country, timezone, locale, theme::text, reminder_enabled, reminder_time, group_warning, daily_message_push, show_country, weekly_goal, muted_at, created_at, last_active_at FROM users WHERE id = ${userId}`);
       if (!u) throw new AppError('NOT_FOUND', 'User not found');
       const [identities, devices, stats, daily, meditations, recipes, dedications, blocks, entitlement, inbox, events] = await Promise.all([
         q(sql`SELECT provider::text, created_at FROM auth_identities WHERE user_id = ${userId}`),
         q(sql`SELECT platform::text, model, app_version, os_version, (push_token IS NOT NULL) AS push_enabled, created_at, last_seen_at FROM devices WHERE user_id = ${userId}`),
         q(sql`SELECT * FROM user_stats WHERE user_id = ${userId}`),
         q(sql`SELECT local_date::text, minutes, meditations, group_count FROM user_daily_stats WHERE user_id = ${userId} ORDER BY local_date`),
-        q(sql`SELECT m.id, s.title AS session, m.kind::text, m.started_at, m.ended_at, m.duration_sec, m.counted, m.completed, m.local_date::text FROM meditations m LEFT JOIN sessions s ON s.id = m.session_id WHERE m.user_id = ${userId} ORDER BY m.started_at`),
+        q(sql`SELECT m.id, s.title AS session, m.kind::text, m.started_at, m.ended_at, m.duration_sec, m.counted, m.completed, m.local_date::text, m.hr_delta_bpm, m.hr_avg_bpm FROM meditations m LEFT JOIN sessions s ON s.id = m.session_id WHERE m.user_id = ${userId} ORDER BY m.started_at`),
         q(sql`SELECT * FROM recipes WHERE user_id = ${userId}`),
-        q(sql`SELECT id, text, status::text, holding_count, created_at FROM dedications WHERE user_id = ${userId} ORDER BY created_at`),
+        q(sql`SELECT id, text, place, status::text, holding_count, created_at FROM dedications WHERE user_id = ${userId} ORDER BY created_at`),
         q(sql`SELECT blocked_id, created_at FROM user_blocks WHERE blocker_id = ${userId}`),
         q(sql`SELECT active, product_id, store::text, period_type::text, started_at, expires_at, will_renew, billing_issue FROM entitlements WHERE user_id = ${userId}`),
         q(sql`SELECT type, title, body, created_at, read_at FROM inbox_items WHERE user_id = ${userId} ORDER BY created_at`),
@@ -60,14 +61,23 @@ export class UserDataService {
         q(sql`SELECT c.name, p.joined_at, p.completed_days, p.finished_at FROM challenge_participants p JOIN challenges c ON c.id = p.challenge_id WHERE p.user_id = ${userId}`),
         q(sql`SELECT key, reached_at FROM user_milestones WHERE user_id = ${userId} ORDER BY reached_at`),
       ]);
+      // Stitch data export: saved messages, kudos sent, chosen intentions
+      const [savedMessages, kudos, intentions] = await Promise.all([
+        q(sql`SELECT date::text, created_at FROM saved_messages WHERE user_id = ${userId} ORDER BY date`),
+        q(sql`SELECT s.title AS session, k.local_date::text, k.created_at FROM session_kudos k JOIN sessions s ON s.id = k.session_id WHERE k.user_id = ${userId} ORDER BY k.created_at`),
+        q(sql`SELECT starts_at, intention FROM group_intentions WHERE user_id = ${userId} ORDER BY starts_at`),
+      ]);
       await this.progress(jobId, { progress: 60 });
-      const doc = { exportedAt: new Date().toISOString(), user: u, identities, devices, stats: stats[0] ?? null, dailyStats: daily, meditations, recipes, dedications, blocks, entitlement: entitlement[0] ?? null, inbox, events, gratitude, breathPatterns, challenges, milestones };
+      const doc = { exportedAt: new Date().toISOString(), user: u, identities, devices, stats: stats[0] ?? null, dailyStats: daily, meditations, recipes, dedications, blocks, entitlement: entitlement[0] ?? null, inbox, events, gratitude, breathPatterns, challenges, milestones, savedMessages, kudos, intentions };
       const base = `exports/${userId}/${jobId}`;
-      await this.s3.putBuffer(`${base}.json`, Buffer.from(JSON.stringify(doc, null, 2)), 'application/json');
-      await this.s3.putBuffer(`${base}-meditations.csv`, Buffer.from(toCsv(meditations)), 'text/csv');
-      const result = { json: await this.s3.presignGet(`${base}.json`), csv: await this.s3.presignGet(`${base}-meditations.csv`), meditations: meditations.length, expiresInHours: 24 };
+      const json = Buffer.from(JSON.stringify(doc, null, 2)), csv = Buffer.from(toCsv(meditations)), dailyCsv = Buffer.from(toCsv(daily));
+      await this.s3.putBuffer(`${base}.json`, json, 'application/json');
+      await this.s3.putBuffer(`${base}-meditations.csv`, csv, 'text/csv');
+      // one archive with the structured file and the clean tables (Stitch "Request archive (.zip)")
+      await this.s3.putBuffer(`${base}.zip`, zipStore([{ name: 'telemetry.json', data: json }, { name: 'sits_history.csv', data: csv }, { name: 'daily_totals.csv', data: dailyCsv }]), 'application/zip');
+      const result = { json: await this.s3.presignGet(`${base}.json`), csv: await this.s3.presignGet(`${base}-meditations.csv`), zip: await this.s3.presignGet(`${base}.zip`), meditations: meditations.length, expiresInHours: 24 };
       await this.progress(jobId, { status: 'done', progress: 100, result });
-      if (emailTo) await this.mailer.send({ to: emailTo, subject: 'Your WeHum data export', text: `Your data is ready. The links work for 24 hours.\n\nAll data (JSON): ${result.json}\nMeditations (CSV): ${result.csv}\n` }).catch(() => null);
+      if (emailTo) await this.mailer.send({ to: emailTo, subject: 'Your WeHum data export', text: `Your data is ready. The links work for 24 hours.\n\nArchive (ZIP): ${result.zip}\nAll data (JSON): ${result.json}\nMeditations (CSV): ${result.csv}\n` }).catch(() => null);
       return result;
     } catch (e) {
       await this.progress(jobId, { status: 'failed', error: (e as Error).message.slice(0, 500) });

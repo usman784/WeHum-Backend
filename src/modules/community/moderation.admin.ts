@@ -14,6 +14,7 @@ const Queue = z.object({ filter: z.enum(['review', 'flagged', 'hidden', 'all']).
 const Bulk = z.object({ ids: ids, action: z.enum(['hide', 'keep']) }).strict();
 const MuteDto = z.object({ muted: z.boolean().default(true) }).strict();
 const Id = new Zod(z.string().uuid());
+const TeacherPost = z.object({ text: z.string().trim().min(1).max(200), sessionId: z.string().uuid().optional() }).strict();
 
 @ApiTags('Admin Moderation')
 @ApiBearerAuth()
@@ -49,6 +50,15 @@ export class ModerationAdminController {
   @HttpCode(200) @Post('users/:id/mute')
   mute(@CurrentActor() a: Actor, @Param('id', Id) id: string, @Body(new Zod(MuteDto)) b: z.infer<typeof MuteDto>) {
     return this.writer.run(a, { action: b.muted ? 'user.mute' : 'user.unmute', type: 'user', id }, async () => ({ result: await this.community.setMuted(id, b.muted), after: { muted: b.muted } }));
+  }
+
+  /** Raphael writes a dedication himself (shown as "Raphael · Teacher" in Together). */
+  @HttpCode(201) @Post('dedications/teacher')
+  teacherPost(@CurrentActor() a: Actor, @Body(new Zod(TeacherPost)) b: z.infer<typeof TeacherPost>) {
+    return this.writer.run(a, { action: 'dedication.create', type: 'dedication', id: 'teacher' }, async () => {
+      const r = await this.community.postAsTeacher(b.text, b.sessionId);
+      return { result: r, after: { text: b.text, sessionId: b.sessionId ?? null } };
+    });
   }
 
   @Get('moderation/rules')

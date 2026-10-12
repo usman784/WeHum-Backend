@@ -64,6 +64,7 @@ export class EventRouter implements OnModuleInit {
         admin.to('dashboard').emit('live:agg', p);
         break;
       case 'session:live': live.to(`session:${p.sessionId}`).emit('session:live', p); break;
+      case 'silence:live': live.to('silence').emit('silence:live', p); break;
       case 'motd:stats': live.to(`motd:${p.date}`).emit('motd:stats', p); break;
       case 'lobby:state': live.to(`lobby:${p.date}`).emit('lobby:state', p); break;
       case 'group:start': live.to(`lobby:${p.date}`).emit('group:start', p); break;

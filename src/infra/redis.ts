@@ -24,6 +24,7 @@ export const K = {
   presenceSessionCountries: (sessionId: string) => `pz:sc:${sessionId}`,
   liveAggLast: 'live:agg:last',
   lobbyCountries: (date: string) => `lobby:c:${date}`,
+  lobbyIntentions: (slot: string) => `lobby:i:${slot}`,
   minsToday: (date: string) => `min:${date}`,
   dashKpisLast: 'dash:kpis:last',
   editing: (type: string, id: string) => `edit:${type}:${id}`,

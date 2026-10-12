@@ -12,12 +12,17 @@ import { CONTENT_ROLES } from '../../admin-auth/rbac';
 import { AdminWriter, changed, CurrentActor, etag, lockVersioned, type Actor } from '../admin-writer';
 import { IdParam, uuid as uuidDto } from '../dto';
 
-const CreateDto = z.object({
+const Shape = z.object({
   name: z.string().trim().min(1).max(80), days: z.number().int().min(1).max(365), counts: z.enum(['any', 'sleep', 'group']).default('any'),
   minMinutes: z.number().int().min(1).max(120).default(3), membersOnly: z.boolean().default(true), showOnYou: z.boolean().default(true),
   coverMediaId: uuidDto.nullable().optional(), startsAt: z.string().datetime().nullable().optional(),
+  /** Cohort sprint content (Stitch challenge detail). */
+  blurb: z.string().trim().max(600).nullable().optional(), leadTeacherId: uuidDto.nullable().optional(), badgeName: z.string().trim().max(60).nullable().optional(),
+  graceDays: z.number().int().min(0).max(7).default(1), unlockTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm').default('07:00'),
+  schedule: z.array(z.object({ day: z.number().int().min(1).max(365), title: z.string().trim().min(1).max(80), minutes: z.number().int().min(1).max(180), summary: z.string().trim().max(240).default(''), sessionId: uuidDto.nullable().optional() }).strict()).max(365).default([]),
 }).strict();
-const PatchDto = CreateDto.partial().extend({ status: z.enum(['draft', 'scheduled', 'live', 'archived']).optional() }).strict();
+const CreateDto = Shape.refine((b) => b.schedule.every((d) => d.day <= b.days), { message: 'A scheduled day is beyond the challenge length', path: ['schedule'] });
+const PatchDto = Shape.partial().extend({ status: z.enum(['draft', 'scheduled', 'live', 'archived']).optional() }).strict();
 type Row = typeof challenges.$inferSelect;
 const toDb = (b: { startsAt?: string | null }) => ({ ...b, startsAt: b.startsAt === undefined ? undefined : b.startsAt ? new Date(b.startsAt) : null });
 

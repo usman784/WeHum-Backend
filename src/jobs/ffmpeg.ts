@@ -51,3 +51,9 @@ export async function transcodeVideo(input: string, output: string) {
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', output,
   ], { maxBuffer: BIG });
 }
+
+/** The first `sec` seconds as AAC with a short fade-out: the 30-second preview of a locked meditation. */
+export async function previewClip(input: string, output: string, sec = 30) {
+  await run(env.FFMPEG_PATH, ['-y', '-hide_banner', '-loglevel', 'error', '-i', input, '-t', String(sec), '-vn', '-af', `afade=t=out:st=${Math.max(0, sec - 2)}:d=2`,
+    '-c:a', 'aac', '-b:a', '96k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', output], { maxBuffer: BIG });
+}

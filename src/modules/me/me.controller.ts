@@ -20,6 +20,7 @@ const PatchMe = z.object({
   groupWarning: z.boolean().optional(),
   dailyMessagePush: z.boolean().optional(),
   showCountry: z.boolean().optional(),
+  weeklyGoal: z.number().int().min(1).max(7).optional(),
 }).strict();
 
 @ApiTags('Me')

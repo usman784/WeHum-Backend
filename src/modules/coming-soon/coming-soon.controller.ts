@@ -25,6 +25,7 @@ export class ComingSoonController {
 
   // challenges (app 69)
   @Get('challenges') challenges(@CurrentUser() u: AppUser) { return this.svc.challenges(u); }
+  @Get('challenges/:id') challenge(@CurrentUser() u: AppUser, @Param('id', Id) id: string) { return this.svc.challengeDetail(u, id); }
   @RateLimit('challenge', 20, 60) @HttpCode(200) @Post('challenges/:id/join') join(@CurrentUser() u: AppUser, @Param('id', Id) id: string) { return this.svc.join(u, id); }
   @RateLimit('challenge', 20, 60) @Delete('challenges/:id/join') leave(@CurrentUser() u: AppUser, @Param('id', Id) id: string) { return this.svc.leave(u, id); }
 

@@ -159,6 +159,12 @@ export async function seedDemo(url?: string) {
       (gen_random_uuid(), '21 days to a habit', 21, 'any', 3, true, 'live'),
       (gen_random_uuid(), 'Sleep week', 7, 'sleep', 3, true, 'live'),
       (gen_random_uuid(), 'New year, 30 days', 30, 'any', 3, true, 'draft') RETURNING id, days`);
+    const SCHED = ['The Grounding Exhale', 'Cadence Synchronization', 'Peripheral Vision & Softening', 'Steadiness Under Pressure', 'Vagus Nerve Reset', 'Open Awareness & Silence', 'Graduation: Integration'];
+    for (const r of ch.rows.slice(0, 3)) {
+      const n = Math.min(Number(r.days), 7);
+      await q(`UPDATE challenges SET blurb = $2, badge_name = $3, grace_days = 1, unlock_time = '07:00', schedule = $4::jsonb WHERE id = $1`,
+        [r.id, 'A progressive protocol led by Raphael. A short sit every morning before the day starts.', 'Finisher', JSON.stringify(SCHED.slice(0, n).map((title, i) => ({ day: i + 1, title, minutes: 10 + i * 2, summary: 'Guided by Raphael.' })))]);
+    }
     for (let i = 0; i < 30; i++) {
       const c = ch.rows[i % 3]!;
       const done = Math.min(c.days, (i * 3) % (c.days + 3));

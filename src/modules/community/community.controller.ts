@@ -6,10 +6,11 @@ import { AppError } from '../../common/errors';
 import { Zod } from '../../common/zod';
 import { CommunityService, REPORT_REASONS } from './community.service';
 
-const PostDto = z.object({ meditationId: z.string().uuid(), text: z.string().max(400) }).strict(); // the 200-character limit is checked after trimming (below)
+const PostDto = z.object({ meditationId: z.string().uuid(), text: z.string().max(400), locationMode: z.enum(['city', 'worldwide']).default('worldwide') }).strict(); // the 200-character limit is checked after trimming (below)
 const ReportDto = z.object({ reason: z.enum(REPORT_REASONS), block: z.boolean().optional() }).strict();
 const ListQuery = z.object({ cursor: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(50).default(20) });
 const Id = new Zod(z.string().uuid());
+const TimeQuery = z.object({ time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm') });
 
 @ApiTags('Community')
 @ApiBearerAuth()
@@ -19,6 +20,18 @@ export class CommunityController {
 
   @Get('sessions/:id/dedications')
   list(@CurrentUser() u: AppUser, @Param('id', Id) id: string, @Query(new Zod(ListQuery)) q: z.infer<typeof ListQuery>) { return this.community.list(u, id, q); }
+
+  /** Together "Shared intent": the newest dedications across all meditations (everyone can read). */
+  @Get('community/feed')
+  feed(@CurrentUser() u: AppUser, @Query(new Zod(ListQuery)) q: z.infer<typeof ListQuery>) { return this.community.feed(u, q); }
+
+  /** Sit-time screen: "N members sit together in this block". */
+  @Get('community/members-at')
+  membersAt(@Query(new Zod(TimeQuery)) q: z.infer<typeof TimeQuery>) { return this.community.membersAt(q.time); }
+
+  /** Data & privacy: strip the name and place from my past dedications. */
+  @HttpCode(200) @Post('me/dedications/anonymize')
+  anonymize(@CurrentUser() u: AppUser) { return this.community.anonymize(u.id); }
 
   @Member() @Account() @RateLimit('dedication', 10, 60) @Post('dedications')
   post(@CurrentUser() u: AppUser, @Body(new Zod(PostDto)) b: z.infer<typeof PostDto>) {

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { K, REDIS } from '../infra/redis';
+import { beltsOf, type BeltCounts } from '../common/belts';
 import { GroupService } from '../modules/today/group.service';
 import { ALL_REGIONS, regionOf } from './regions';
 import { HIDDEN_COUNTRY } from './presence.service';
@@ -8,7 +9,7 @@ import { HIDDEN_COUNTRY } from './presence.service';
 export const LOBBY_FRESH_MS = 90_000;
 const KEEP_SEC = 2 * 86_400;
 
-export interface LobbyState { date: string; waiting: number; countries: number; regions: { r: string; n: number }[]; startsAt: string }
+export interface LobbyState { date: string; waiting: number; countries: number; regions: { r: string; n: number }[]; byBelt: BeltCounts; intentions: Record<string, number>; startsAt: string }
 
 /** The waiting room before a group meditation (spec §7.4): `lobby:{date}` ZSET user → last seen, country in a side hash. */
 @Injectable()
@@ -44,9 +45,10 @@ export class LobbyService {
     for (const c of countries) if (c && c !== HIDDEN_COUNTRY) perCountry.set(c, (perCountry.get(c) ?? 0) + 1);
     const perRegion = new Map<string, number>();
     for (const [c, n] of perCountry) perRegion.set(regionOf(c), (perRegion.get(regionOf(c)) ?? 0) + n);
-    const g = await this.group.forDate(date, now);
+    const [g, intentions] = await Promise.all([this.group.forSlot(date, now), this.redis.hgetall(K.lobbyIntentions(date)).catch(() => ({} as Record<string, string>))]);
     return {
-      date, waiting: members.length, countries: perCountry.size,
+      date, waiting: members.length, countries: perCountry.size, byBelt: beltsOf([...perCountry].map(([c, n]) => ({ c, n }))),
+      intentions: Object.fromEntries(Object.entries(intentions).map(([k, v]) => [k, Number(v)]).filter(([, n]) => (n as number) > 0)),
       regions: ALL_REGIONS.filter((r) => perRegion.has(r)).map((r) => ({ r, n: perRegion.get(r)! })).sort((a, b) => b.n - a.n || a.r.localeCompare(b.r)), startsAt: g.startsAt,
     };
   }

@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, ilike, lt, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, lt, lte } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { AppError } from '../../common/errors';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
-import { dailyMessages, motdDays, motdVariants, sessions, teachers, themes } from '../../db/schema';
+import { dailyMessages, motdDays, motdVariants, savedMessages, sessions, teachers, themes } from '../../db/schema';
 import { CdnSigner } from '../../infra/cdn';
 import { CacheService } from '../../infra/cache';
 import { DRIZZLE, type DB } from '../../infra/core.module';
@@ -61,11 +61,12 @@ export class MotdService {
     return m?.sessionId === sessionId ? m.practicedToday : 0;
   }
 
-  // ── Daily messages (member). Future-dated messages are never served beyond "tomorrow" (timezone slack).
-  private toMessage(m: typeof dailyMessages.$inferSelect, imageKey?: string | null) {
+  // ── Daily messages. Free messages (`access = free`) are open to everyone, premium ones to members.
+  // Future-dated messages are never served beyond "tomorrow" (timezone slack).
+  private toMessage(m: typeof dailyMessages.$inferSelect, imageKey?: string | null, locked = false) {
     return {
-      date: m.date, type: m.type, title: m.title, text: m.text, durationSec: m.durationSec, themeTag: m.themeTag,
-      image: imageKey ? { url: this.cdn.publicUrl(imageKey) } : null, hasMedia: !!m.mediaId,
+      date: m.date, type: m.type, title: m.title, text: locked ? null : m.text, durationSec: m.durationSec, themeTag: m.themeTag, access: m.access, locked,
+      image: imageKey ? { url: this.cdn.publicUrl(imageKey) } : null, hasMedia: !!m.mediaId, hasVideo: !!m.videoMediaId,
     };
   }
 
@@ -74,16 +75,51 @@ export class MotdService {
     return (await coverMap(this.db, [m.imageMediaId])).get(m.imageMediaId)?.key ?? null;
   }
 
-  /** Message for the date, falling back to the latest earlier one. */
-  async messageFor(date: string) {
+  /** Message for the date, falling back to the latest earlier one. `viewer` decides what a free user may open. */
+  async messageFor(date: string, viewer?: { userId: string; member: boolean }) {
     const max = addDaysIso(utcToday(), 1);
     const d = date > max ? max : date;
     const [m] = await this.db.select().from(dailyMessages).where(and(eq(dailyMessages.status, 'live'), lte(dailyMessages.date, d))).orderBy(desc(dailyMessages.date)).limit(1);
     if (!m) throw new AppError('NOT_FOUND', 'No daily message yet');
-    return this.toMessage(m, await this.imageKey(m));
+    const locked = !!viewer && !viewer.member && m.access === 'premium';
+    if (locked) throw new AppError('PREMIUM_REQUIRED', 'A WeHum membership is needed for this daily message');
+    const base = this.toMessage(m, await this.imageKey(m));
+    if (!viewer) return base;
+    const [saved, listeners, week] = await Promise.all([
+      this.db.select({ d: savedMessages.date }).from(savedMessages).where(and(eq(savedMessages.userId, viewer.userId), eq(savedMessages.date, m.date))).then((r) => r.length > 0),
+      this.redis.scard(`dm:${m.date}:listeners`).catch(() => 0),
+      this.week(m.date, viewer.member),
+    ]);
+    return { ...base, transcript: m.transcript, saved, listenersToday: listeners, week };
   }
 
-  async archive(p: { q?: string; theme?: string; cursor?: string; limit?: number }) {
+  /** The messages of the ISO week of `date` (past and today as items, later days as `upcoming` without a title). */
+  private async week(date: string, member: boolean) {
+    const dow = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+    const from = addDaysIso(date, -dow), to = addDaysIso(from, 6);
+    const rows = await this.db.select().from(dailyMessages).where(and(gte(dailyMessages.date, from), lte(dailyMessages.date, to), eq(dailyMessages.status, 'live'))).orderBy(asc(dailyMessages.date));
+    const today = utcToday();
+    return rows.map((m) => m.date > today
+      ? { date: m.date, title: null, durationSec: null, access: m.access, state: 'upcoming' as const, locked: true }
+      : { date: m.date, title: m.title, durationSec: m.durationSec, access: m.access, state: m.date === date ? ('today' as const) : ('available' as const), locked: !member && m.access === 'premium' });
+  }
+
+  /** A member or free user finished a message: counted once per person and day (a Redis set; "N practitioners completed today"). */
+  async markListened(date: string, userId: string) {
+    const key = `dm:${date}:listeners`;
+    await this.redis.multi().sadd(key, userId).expire(key, 3 * 86_400).exec();
+    return { listeners: await this.redis.scard(key) };
+  }
+
+  async save(userId: string, date: string, on: boolean) {
+    const [m] = await this.db.select({ d: dailyMessages.date }).from(dailyMessages).where(and(eq(dailyMessages.date, date), eq(dailyMessages.status, 'live')));
+    if (!m) throw new AppError('NOT_FOUND', 'No daily message for this date');
+    if (on) await this.db.insert(savedMessages).values({ userId, date }).onConflictDoNothing();
+    else await this.db.delete(savedMessages).where(and(eq(savedMessages.userId, userId), eq(savedMessages.date, date)));
+    return { date, saved: on };
+  }
+
+  async archive(p: { q?: string; theme?: string; cursor?: string; limit?: number }, member = true) {
     const limit = clampLimit(p.limit);
     const conds = [eq(dailyMessages.status, 'live'), lte(dailyMessages.date, addDaysIso(utcToday(), 1))];
     const c = decodeCursor(p.cursor);
@@ -94,7 +130,7 @@ export class MotdService {
     const page = rows.slice(0, limit);
     const covers = await coverMap(this.db, page.map((m) => m.imageMediaId));
     return {
-      data: page.map((m) => this.toMessage(m, m.imageMediaId ? covers.get(m.imageMediaId)?.key : null)),
+      data: page.map((m) => this.toMessage(m, m.imageMediaId ? covers.get(m.imageMediaId)?.key : null, !member && m.access === 'premium')),
       meta: { nextCursor: rows.length > limit ? encodeCursor(page.at(-1)!.date, page.at(-1)!.date) : null },
     };
   }

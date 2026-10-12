@@ -10,6 +10,7 @@ import { ConfigService } from '../config/config.service';
 import { GroupService } from '../today/group.service';
 import { metrics } from '../../infra/metrics';
 import { PushTransport } from './push.transport';
+import { Mailer } from '../../infra/mailer';
 
 export type Audience = 'all' | 'members' | 'free' | 'trial' | 'guests' | 'country' | 'founding';
 export const QUIET_START = '22:00', QUIET_END = '07:00';
@@ -39,7 +40,7 @@ export class PushService {
   private readonly log = new Logger('PushService');
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly bus: RealtimeBus,
-    private readonly transport: PushTransport, private readonly config: ConfigService, private readonly group: GroupService,
+    private readonly transport: PushTransport, private readonly config: ConfigService, private readonly group: GroupService, private readonly mailer: Mailer,
   ) {}
 
   // ───────────── delivery
@@ -121,22 +122,28 @@ export class PushService {
     return out;
   }
 
-  /** Once, in the minute that is `reminderMin` before the group starts. */
+  /**
+   * Once per sit, in the minute that is `reminderMin` before it starts. The daily sit warns everyone who opted in
+   * (setting or "Remind me"); an hourly sit only warns the people who asked for that sit.
+   */
   async groupWarning(now: number): Promise<number> {
     const auto = await this.auto('group_warning');
     if (!auto?.enabled) return 0;
-    const today = new Date(now).toISOString().slice(0, 10);
-    const g = await this.group.forDate(today, now);
-    const warnAt = Date.parse(g.startsAt) - g.reminderMin * 60_000;
-    if (now < warnAt || now >= warnAt + 60_000) return 0;
-    if ((await this.redis.set(`push:group:${today}:${g.startsAt}`, '1', 'EX', 86_400, 'NX')) !== 'OK') return 0;
-    const reminded = await this.redis.smembers(`lobby:remind:${today}`).catch(() => [] as string[]);
-    const opted = await this.db.select({ id: users.id }).from(users).where(and(eq(users.groupWarning, true), sql`${users.deletedAt} is null`));
-    const ids = [...new Set([...reminded, ...opted.map((o) => o.id)])];
-    const time = new Date(g.startsAt).toISOString().slice(11, 16);
-    const r = await this.deliver(ids, { title: auto.title, body: fill(auto.body, { title: g.title ?? 'The Meditation of the Day', time: `${time} UTC`, waiting: g.waiting }), type: 'group_warning', deepLink: 'wehum://group' });
-    await this.count('group_warning', r.delivered.length);
-    return r.delivered.length;
+    let total = 0;
+    for (const slot of await this.group.slots(now)) {
+      const g = await this.group.forSlot(slot, now);
+      const warnAt = Date.parse(g.startsAt) - g.reminderMin * 60_000;
+      if (now < warnAt || now >= warnAt + 60_000) continue;
+      if ((await this.redis.set(`push:group:${slot}:${g.startsAt}`, '1', 'EX', 86_400, 'NX')) !== 'OK') continue;
+      const reminded = await this.redis.smembers(`lobby:remind:${slot}`).catch(() => [] as string[]);
+      const opted = slot.length === 10 ? await this.db.select({ id: users.id }).from(users).where(and(eq(users.groupWarning, true), sql`${users.deletedAt} is null`)) : [];
+      const ids = [...new Set([...reminded, ...opted.map((o) => o.id)])];
+      const time = new Date(g.startsAt).toISOString().slice(11, 16);
+      const r = await this.deliver(ids, { title: auto.title, body: fill(auto.body, { title: g.title ?? 'The Meditation of the Day', time: `${time} UTC`, waiting: g.waiting }), type: 'group_warning', deepLink: 'wehum://group' });
+      await this.count('group_warning', r.delivered.length);
+      total += r.delivered.length;
+    }
+    return total;
   }
 
   /** Daily: trials that end in about two days get a push and an inbox item, once. */
@@ -150,6 +157,11 @@ export class PushService {
     await this.inbox(claimed, { type: 'trial_ending', title: auto.title, body: auto.body, deepLink: 'wehum://membership' });
     const r = await this.deliver(claimed, { title: auto.title, body: auto.body, type: 'trial_ending', deepLink: 'wehum://membership' });
     await this.count('trial_ending', r.delivered.length);
+    // the Stitch paywall promises a reminder email two days before the trial ends (people with an email on file)
+    if (claimed.length) {
+      const mails = await this.db.select({ email: users.email, name: users.firstName }).from(users).where(and(inArray(users.id, claimed), sql`${users.email} is not null`));
+      for (const m of mails) await this.mailer.send({ to: m.email!, subject: auto.title, text: `${m.name ? `Hi ${m.name},\n\n` : ''}${auto.body}\n\nManage your membership in the App Store or Google Play subscriptions.\n` }).catch(() => null);
+    }
     return claimed.length;
   }
 

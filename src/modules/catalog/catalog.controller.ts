@@ -1,4 +1,7 @@
-import { Controller, Get, Param, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Query, Req, Res } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { users as usersTable } from '../../db/schema';
+import { DRIZZLE, type DB } from '../../infra/core.module';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -8,6 +11,7 @@ import { Zod } from '../../common/zod';
 import { CatalogService } from './catalog.service';
 
 const Id = new Zod(z.string().uuid());
+const DirectoryQuery = z.object({ country: z.string().regex(/^[A-Za-z]{2}$/).transform((c) => c.toUpperCase()).optional() });
 const SearchQuery = z.object({
   q: z.string().trim().min(2).max(60).optional(),
   themeId: z.string().uuid().optional(),
@@ -20,7 +24,9 @@ const SearchQuery = z.object({
 @ApiBearerAuth()
 @Controller('v1')
 export class CatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(private readonly catalog: CatalogService, @Inject(DRIZZLE) private readonly db: DB) {}
+
+  private readonly users = { countryOf: async (id: string) => (await this.db.select({ c: usersTable.country }).from(usersTable).where(eq(usersTable.id, id)))[0]?.c ?? null };
 
   /** Full snapshot. `?version=n` equal to the current version (or a matching If-None-Match) → 304. */
   @Get('catalog')
@@ -31,6 +37,14 @@ export class CatalogController {
     if (same) return;
     if (clientVersion !== undefined && Number(clientVersion) === version) { res.status(304); return; }
     return { data: await this.catalog.snapshot(version), meta: { version } };
+  }
+
+  /** Crisis directory for a region (`?country=US`; default: the person's country, then the configured default). */
+  @Get('sos/directory')
+  async directory(@CurrentUser() u: AppUser, @Query(new Zod(DirectoryQuery)) q: z.infer<typeof DirectoryQuery>, @Res({ passthrough: true }) res: FastifyReply) {
+    res.header('cache-control', PRIVATE);
+    const country = q.country ?? (await this.users.countryOf(u.id));
+    return this.catalog.crisisDirectory(country);
   }
 
   @Get('sos')

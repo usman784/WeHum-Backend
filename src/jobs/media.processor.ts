@@ -8,7 +8,7 @@ import { encode } from 'blurhash';
 import { jobs, mediaAssets, outboxEvents } from '../db/schema';
 import { DRIZZLE, type DB } from '../infra/core.module';
 import { S3Service } from '../infra/s3';
-import { integratedLufs, loopCheck, probe, transcodeAudio, transcodeVideo } from './ffmpeg';
+import { integratedLufs, loopCheck, previewClip, probe, transcodeAudio, transcodeVideo } from './ffmpeg';
 
 const MAX_AUDIO_SEC = 4 * 3600;
 const IMAGE_WIDTHS = [1200, 600, 300] as const;
@@ -27,6 +27,28 @@ export class MediaProcessor {
       const [j] = await tx.update(jobs).set({ ...patch, updatedAt: new Date() }).where(eq(jobs.id, jobId)).returning({ id: jobs.id, status: jobs.status, progress: jobs.progress });
       if (j) await tx.insert(outboxEvents).values({ topic: 'job:progress', payload: { jobId: j.id, status: j.status, progress: j.progress } });
     });
+  }
+
+  /** Makes (or remakes) the 30-second preview of an audio asset that is already processed. */
+  async makePreview(mediaId: string, jobId: string) {
+    const [m] = await this.db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaId));
+    if (!m || m.kind !== 'audio' || m.status !== 'ready') { await this.progress(jobId, { status: 'failed', error: 'Only processed audio can have a preview' }); return; }
+    const dir = await mkdtemp(join(tmpdir(), 'wehum-preview-'));
+    try {
+      await this.progress(jobId, { status: 'running', progress: 10 });
+      const src = join(dir, 'in.m4a'), out = join(dir, 'preview.m4a');
+      await this.s3.download(m.storageKey, src);
+      await previewClip(src, out);
+      const key = `media/${m.id}/v1/preview.m4a`;
+      await this.s3.uploadFile(key, out, m.mime);
+      await this.db.update(mediaAssets).set({ previewKey: key }).where(eq(mediaAssets.id, m.id));
+      await this.progress(jobId, { status: 'done', progress: 100, result: { previewKey: key } });
+    } catch (e) {
+      await this.progress(jobId, { status: 'failed', error: 'The preview could not be made' });
+      throw e;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 
   /** Runs one asset through the pipeline. On the last attempt a failure is recorded on the asset so the CMS can show it. */
@@ -78,9 +100,19 @@ export class MediaProcessor {
     const mime = video ? 'video/mp4' : 'audio/mp4';
     await this.s3.uploadFile(key, out, mime);
     const final = await probe(out);
+    // 30-second preview of an audio file (the preview sheet for locked meditations); best effort, never blocks publishing
+    let previewKey: string | null = null;
+    if (!video && final.durationSec > 35) {
+      try {
+        const pv = join(dir, 'preview.m4a');
+        await previewClip(out, pv);
+        previewKey = `media/${m.id}/v1/preview.m4a`;
+        await this.s3.uploadFile(previewKey, pv, mime);
+      } catch (e) { this.log.warn(`preview clip for ${m.id} failed: ${(e as Error).message}`); previewKey = null; }
+    }
     await this.db.update(mediaAssets).set({
       status: 'ready', storageKey: key, mime, bytes: (await stat(out)).size, durationSec: final.durationSec || p.durationSec, loudnessLufs: lufs === null ? null : lufs.toFixed(2),
-      width: final.width, height: final.height, error: null,
+      width: final.width, height: final.height, previewKey, error: null,
     }).where(eq(mediaAssets.id, m.id));
     const loudnessWarning = lufs !== null && Math.abs(lufs - LUFS_TARGET) > LUFS_TOLERANCE ? `Loudness ${lufs} LUFS is outside −16 ±1` : null;
     return { durationSec: final.durationSec, lufs, loudnessWarning, loop, codec: p.codec };

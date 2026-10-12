@@ -17,6 +17,10 @@ const PutDto = z.object({
   type: z.enum(['audio', 'video', 'text']), title: z.string().trim().min(1).max(120), text: z.string().max(4000).nullable().optional(),
   mediaId: uuidDto.nullable().optional(), imageMediaId: uuidDto.nullable().optional(), durationSec: z.number().int().min(1).max(3600).nullable().optional(),
   themeTag: z.string().trim().max(40).nullable().optional(), status: z.enum(['draft', 'scheduled', 'live', 'archived']).default('draft'),
+  /** Timed lines for the interactive transcript. */
+  transcript: z.array(z.object({ t: z.number().int().min(0).max(3600), text: z.string().trim().min(1).max(400), section: z.string().trim().max(40).optional() }).strict()).max(200).default([]),
+  videoMediaId: uuidDto.nullable().optional(),
+  access: z.enum(['free', 'premium']).default('premium'),
 }).strict();
 const RangeQuery = z.object({ from: isoDate.optional(), to: isoDate.optional() });
 const DateParam = new Zod(isoDate);
@@ -48,10 +52,12 @@ export class DailyMessagesAdminService {
     }
     if (b.mediaId) await readyMedia(this.db, b.mediaId, ['audio', 'video']);
     if (b.imageMediaId) await readyMedia(this.db, b.imageMediaId, ['image']);
+    if (b.videoMediaId) await readyMedia(this.db, b.videoMediaId, ['video']);
+    if (b.transcript.some((l, i) => i > 0 && l.t < b.transcript[i - 1]!.t)) throw new AppError('VALIDATION_FAILED', 'Transcript lines must be in time order', { fields: [{ path: 'transcript', message: 'Times must not go back' }] });
     return this.writer.run(actor, { action: 'dailyMessage.upsert', type: 'dailyMessage', id: date }, async (tx) => {
       const [cur] = await tx.select().from(dailyMessages).where(eq(dailyMessages.date, date)).for('update');
       if (cur) assertVersion(ifMatch, cur);
-      const values = { ...b, text: b.text ?? null, mediaId: b.mediaId ?? null, imageMediaId: b.imageMediaId ?? null, durationSec: b.durationSec ?? null, themeTag: b.themeTag ?? null };
+      const values = { ...b, text: b.text ?? null, mediaId: b.mediaId ?? null, imageMediaId: b.imageMediaId ?? null, durationSec: b.durationSec ?? null, themeTag: b.themeTag ?? null, videoMediaId: b.videoMediaId ?? null };
       const [row] = cur
         ? await tx.update(dailyMessages).set({ ...values, version: cur.version + 1, updatedAt: new Date() }).where(eq(dailyMessages.date, date)).returning()
         : await tx.insert(dailyMessages).values({ date, ...values }).returning();

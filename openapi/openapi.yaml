@@ -386,7 +386,7 @@ paths:
       operationId: get_v1_daily_messages_date
       tags: ["Today"]
       summary: "Daily message (falls back to latest earlier)"
-      description: "Auth: member."
+      description: "Auth: device. Free messages open to everyone, premium ones need a membership (403 PREMIUM_REQUIRED). Adds transcript, saved, listenersToday, week."
       parameters:
         - {name: date, in: path, required: true, schema: {type: string}}
       responses:
@@ -1639,6 +1639,161 @@ paths:
       description: "Auth: admin:owner,admin,editor,moderator."
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/library/summary:
+    get:
+      operationId: get_v1_library_summary
+      tags: ["Catalog"]
+      summary: "Library header numbers and sat-today counts"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/media/preview-url:
+    post:
+      operationId: post_v1_media_preview_url
+      tags: ["Media"]
+      summary: "30-second preview of a locked premium meditation"
+      description: "Auth: device. Body {sessionId}; 422 PREVIEW_NOT_AVAILABLE; 10 per day."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/silence:
+    get:
+      operationId: get_v1_silence
+      tags: ["Today"]
+      summary: "Silence Room: live count by belt, durations, cadence, bells"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/group/intention:
+    put:
+      operationId: put_v1_group_intention
+      tags: ["Today"]
+      summary: "Save the intention for a sit"
+      description: "Auth: member. Body {slot, intention}."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/daily-messages/{date}/complete:
+    post:
+      operationId: post_v1_daily_messages_date_complete
+      tags: ["Today"]
+      summary: "Mark a daily message as listened (counted once per person)"
+      description: "Auth: device."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/daily-messages/{date}/save:
+    put:
+      operationId: put_v1_daily_messages_date_save
+      tags: ["Today"]
+      summary: "Save a daily message to notes"
+      description: "Auth: device."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: delete_v1_daily_messages_date_save
+      tags: ["Today"]
+      summary: "Remove a daily message from notes"
+      description: "Auth: device."
+      parameters:
+        - {name: date, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/live/world:
+    get:
+      operationId: get_v1_live_world
+      tags: ["Today"]
+      summary: "World gauge: totals, belts, countries"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/sos/directory:
+    get:
+      operationId: get_v1_sos_directory
+      tags: ["Catalog"]
+      summary: "Crisis directory for a region (?country=)"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/me/dedications/anonymize:
+    post:
+      operationId: post_v1_me_dedications_anonymize
+      tags: ["Community"]
+      summary: "Remove name and place from my past dedications"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/community/feed:
+    get:
+      operationId: get_v1_community_feed
+      tags: ["Community"]
+      summary: "Recent dedications across meditations (cursor)"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/community/members-at:
+    get:
+      operationId: get_v1_community_members_at
+      tags: ["Community"]
+      summary: "How many members sit in a time block (?time=HH:mm)"
+      description: "Auth: device."
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/sessions/{id}/kudos:
+    post:
+      operationId: post_v1_sessions_id_kudos
+      tags: ["Meditations"]
+      summary: "Send kudos to the people who finished this meditation today"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/challenges/{id}:
+    get:
+      operationId: get_v1_challenges_id
+      tags: ["Coming soon"]
+      summary: "Cohort sprint detail with schedule and unlock times"
+      description: "Auth: device."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/media/{id}/preview:
+    post:
+      operationId: post_v1_admin_media_id_preview
+      tags: ["Admin Media"]
+      summary: "Make the 30-second preview clip of a processed audio file"
+      description: "Auth: admin:owner,admin,editor."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /v1/admin/dedications/teacher:
+    post:
+      operationId: post_v1_admin_dedications_teacher
+      tags: ["Admin Moderation"]
+      summary: "Post a dedication as Raphael"
+      description: "Auth: admin:owner,admin,moderator."
       responses:
         '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
         default: {description: Error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}

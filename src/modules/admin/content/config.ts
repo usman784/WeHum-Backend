@@ -25,16 +25,45 @@ export const CONFIG_SCHEMAS = {
     /** Newest release per store: older apps get a dismissible "update available" prompt (below `minVersion`, which blocks). */
     latestVersion: z.object({ ios: semver, android: semver }).strict().optional(),
     storeUrls: z.object({ ios: z.string().url().max(300).or(z.literal('')), android: z.string().url().max(300).or(z.literal('')) }).strict().optional(),
-    features: z.object({ challenges: flag, gratitude: flag, breathwork: flag, milestones: flag, intent: flag }).strict(),
+    features: z.object({ challenges: flag, gratitude: flag, breathwork: flag, milestones: flag, intent: flag, streaks: flag.default(true), hourlySits: flag.default(false), heartRate: flag.default(false) }).strict(),
     supportEmail: z.string().email(), defaultReminderTime: hhmm, languages: z.array(z.string().max(10)).min(1).max(20),
   }).strict(),
   today: z.object({
     emptyRoomThreshold: z.number().int().min(0).max(1000), freeHomePick: z.enum(['random', 'newest']), showDailyMessage: flag,
     sections: z.object({ progress: flag, liveCounter: flag, worldMap: flag }).strict(),
   }).strict(),
-  group: z.object({ startUtc: hhmm, lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]), lobbyOpenMin: z.number().int().min(1).max(60), reminderMin: z.number().int().min(1).max(60) }).strict(),
+  group: z.object({
+    startUtc: hhmm, lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]), lobbyOpenMin: z.number().int().min(1).max(60), reminderMin: z.number().int().min(1).max(60),
+    cadence: z.enum(['daily', 'hourly']).default('daily'),
+    hourly: z.object({ fromHourUtc: z.number().int().min(0).max(23), toHourUtc: z.number().int().min(0).max(23), lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]) }).strict()
+      .refine((h) => h.toHourUtc >= h.fromHourUtc, 'The last hour must not be before the first').default({ fromHourUtc: 6, toHourUtc: 22, lengthMin: 10 }),
+    intentions: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
+    focus: z.object({ title: z.string().trim().max(60), summary: z.string().trim().max(120), quote: z.string().trim().max(200), attribution: z.string().trim().max(40) }).strict()
+      .default({ title: '', summary: '', quote: '', attribution: 'Raphael' }),
+    doorsOpenSec: z.number().int().min(0).max(600).default(60),
+  }).strict(),
+  silence: z.object({
+    durations: z.array(z.number().int().min(0).max(180)).min(1).max(12).refine((a) => new Set(a).size === a.length, 'Duplicate durations'),
+    cadence: z.object({ inhaleSec: z.number().int().min(1).max(15), exhaleSec: z.number().int().min(1).max(15) }).strict(),
+    extendMin: z.number().int().min(1).max(30),
+  }).strict(),
+  crisis: z.object({
+    defaultRegion: z.string().regex(/^[A-Z]{2}$/),
+    tip: z.string().trim().max(400),
+    regions: z.array(z.object({
+      code: z.string().regex(/^[A-Z]{2}$/), name: z.string().trim().min(1).max(60), countries: z.array(z.string().regex(/^[A-Z]{2}$/)).min(1).max(40),
+      lines: z.array(z.object({
+        id: z.string().trim().min(1).max(40), name: z.string().trim().min(1).max(80), kind: z.string().trim().max(40), description: z.string().trim().max(240),
+        actions: z.array(z.object({ type: z.enum(['call', 'sms']), label: z.string().trim().min(1).max(40), value: z.string().regex(/^[+\d][\d ]{1,19}$/, 'Digits only') }).strict()).min(1).max(3),
+      }).strict()).max(10),
+    }).strict()).min(1).max(30),
+    international: z.array(z.object({ country: z.string().trim().min(1).max(60), line: z.string().trim().min(1).max(100), value: z.string().regex(/^[+\d][\d ]{1,19}$/) }).strict()).max(40),
+  }).strict().refine((c) => c.regions.some((r) => r.code === c.defaultRegion), { message: 'The default region must be in the list', path: ['defaultRegion'] }),
+  sitTimes: z.object({ blocks: z.array(z.object({ time: hhmm, label: z.string().trim().min(1).max(30) }).strict()).min(1).max(6) }).strict(),
+  downloads: z.object({ quotaMb: z.number().int().min(100).max(20_000) }).strict(),
   sos: z.object({
     title: z.string().trim().min(1).max(60), subtitle: z.string().trim().max(120),
+    soundBeds: z.array(z.string().trim().min(1).max(30)).max(6).default([]),
     help: z.object({ title: z.string().trim().min(1).max(60), body: z.string().trim().max(400), bookingUrl: url, contactEmail: z.string().email() }).strict(),
   }).strict(),
   moderation: z.object({
@@ -79,7 +108,7 @@ export class ConfigAdminService {
   }
 }
 
-const ConfigKeys = new Zod(z.enum(['main', 'legal', 'moderation', 'today', 'group', 'sos']));
+const ConfigKeys = new Zod(z.enum(['main', 'legal', 'moderation', 'today', 'group', 'sos', 'silence', 'crisis', 'sitTimes', 'downloads']));
 
 @ApiTags('Admin Settings')
 @ApiBearerAuth()

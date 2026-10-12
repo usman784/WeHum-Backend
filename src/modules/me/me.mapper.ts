@@ -33,6 +33,7 @@ export function toMe(u: U, ids: I[], e: E) {
     groupWarning: u.groupWarning,
     dailyMessagePush: u.dailyMessagePush,
     showCountry: u.showCountry,
+    weeklyGoal: u.weeklyGoal,
     createdAt: u.createdAt.toISOString(),
     entitlement: toEntitlement(e),
   };

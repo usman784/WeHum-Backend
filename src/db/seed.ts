@@ -4,7 +4,7 @@
  * Idempotent — safe to run many times. Usage: npm run seed
  */
 import argon2 from 'argon2';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { v7 as uuid } from 'uuid';
 import { env } from '../config/env';
 import { createDb, createPool } from './client';
@@ -108,6 +108,9 @@ export async function seed(url?: string) {
         });
       }
     }
+    for (const sid of sessionIds.slice(0, 6)) {
+      await db.update(s.sessions).set({ phases: [{ atSec: 0, title: 'Arrival' }, { atSec: 180, title: 'Anchoring breath' }, { atSec: 420, title: 'Open awareness' }] }).where(eq(s.sessions.id, sid));
+    }
     // Free for you (online library, YouTube-hosted — never labelled "YouTube" in the app)
     // real, embeddable videos from Raphael Reiter's channel (id, seconds): a made-up id shows "Not available" in the app
     const FREE: [string, string, number][] = [
@@ -133,11 +136,12 @@ export async function seed(url?: string) {
       ['core', 'Breath focus', 300, true], ['core', 'Body awareness', 300, true],
       ['closing', 'Return gently', 60, false], ['closing', 'Gratitude close', 90, false],
       ['sound', 'Rain', 600, true], ['sound', 'Ocean', 600, true], ['sound', 'Forest', 600, true],
-      ['bell', 'Tibetan bowl', 8, false], ['bell', 'Soft chime', 5, false],
+      ['bell', 'Tibetan bowl', 8, false], ['bell', 'Soft chime', 5, false], ['bell', 'Temple bell', 6, false], ['bell', 'Three dissolving gongs', 14, false],
       ['loop', 'OM loop', 12, true], ['loop', 'Mantra loop', 20, true],
     ];
     for (const [i, [kind, name, dur, loop]] of blocks.entries()) {
-      await db.insert(s.soundBlocks).values({ id: uuid(), kind, name, durationSec: dur, loopable: loop, mediaId: await media('audio', name, dur), order: i, loudnessLufs: '-16.20' });
+      const bellRole = kind === 'bell' ? ({ 'Tibetan bowl': 'opening', 'Temple bell': 'opening', 'Soft chime': 'interval', 'Three dissolving gongs': 'closing' } as Record<string, string>)[name] ?? null : null;
+      await db.insert(s.soundBlocks).values({ id: uuid(), kind, name, bellRole, durationSec: dur, loopable: loop, mediaId: await media('audio', name, dur), order: i, loudnessLufs: '-16.20' });
     }
     const program = uuid();
     await db.insert(s.programs).values({ id: program, slug: '7-days-of-calm', title: '7 Days of Calm', description: 'A gentle week to build the habit.', access: 'premium', status: 'live', coverUrl: 'img/lake.jpg' });
@@ -153,6 +157,12 @@ export async function seed(url?: string) {
       await db.insert(s.dailyMessages).values({
         date: day(new Date(today.getTime() + d * 86_400_000)), type: d % 3 === 0 ? 'audio' : 'text', title: ['On patience', 'Small steps', 'Being kind to yourself', 'The quiet in between', 'Starting again', 'You are not alone', 'Rest is practice'][d + 6]!,
         text: 'A short reflection from Raphael for today.', themeTag: THEMES[(d + 6) % THEMES.length]![1], status: 'live',
+        access: d <= -5 ? 'free' : 'premium', durationSec: 255 + (d + 6) * 12,
+        transcript: [
+          { t: 0, text: 'Notice where your shoulders are right now. Most of us carry yesterday into the morning.', section: 'Arrive' },
+          { t: 75, text: 'Breathe in for four counts and lengthen the exhale to six. Let the body hear that it can slow down.', section: 'Breath' },
+          { t: 160, text: 'Take this into the next room you walk into today. Presence is how you show up to pressure.', section: 'Carry it' },
+        ],
       });
     }
     console.log('seed complete');

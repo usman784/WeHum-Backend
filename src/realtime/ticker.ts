@@ -13,6 +13,7 @@ import { LiveService } from '../modules/live/live.service';
 import { addDaysIso } from '../modules/motd/motd.service';
 import { GroupStartService } from './group-start.service';
 import { LobbyService } from './lobby.service';
+import { GroupService } from '../modules/today/group.service';
 import { PresenceService } from './presence.service';
 import { metrics } from '../infra/metrics';
 import { vibration } from './vibration';
@@ -36,10 +37,11 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
   private readonly lastLobby = new Map<string, string>();
   private readonly lastMotd = new Map<string, number>();
   private lastKpis = '';
+  private lastSilence = '';
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly bus: RealtimeBus, private readonly presence: PresenceService,
-    private readonly live: LiveService, private readonly lobby: LobbyService, private readonly groupStart: GroupStartService, private readonly scheduler: SchedulerService,
+    private readonly live: LiveService, private readonly lobby: LobbyService, private readonly groupStart: GroupStartService, private readonly scheduler: SchedulerService, private readonly group: GroupService,
   ) {}
 
   onModuleInit() { if (env.APP_ROLE === 'scheduler') this.start(); }
@@ -84,15 +86,19 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
       if (!(id in active) && sig !== '0:0') { this.lastSession.set(id, '0:0'); events.push({ topic: 'session:live', payload: { sessionId: id, people: 0, countries: 0 } }); }
     }
     await this.bus.publishMany(events);
+    // Silence Room line (Stitch): people sitting in silence now, by belt
+    const sil = await this.live.silence(now);
+    const silSig = hash({ p: sil.people, b: sil.belts });
+    if (silSig !== this.lastSilence) { this.lastSilence = silSig; await this.bus.publish('silence:live', { people: sil.people, belts: sil.belts, quiet: sil.quiet, at: now }); }
     return { liveAgg: published, sessions: events.length };
   }
 
   async lobbyTick(now = Date.now()) {
     let published = 0;
-    for (const date of [utcDay(now), utcDay(now, 1)]) {
+    for (const date of await this.group.slots(now)) {
       await this.lobby.sweep(date, now);
       const st = await this.lobby.state(date, now);
-      const sig = hash({ w: st.waiting, c: st.countries, r: st.regions, s: st.startsAt });
+      const sig = hash({ w: st.waiting, c: st.countries, r: st.regions, b: st.byBelt, i: st.intentions, s: st.startsAt });
       if (sig !== this.lastLobby.get(date)) { this.lastLobby.set(date, sig); await this.bus.publish('lobby:state', st); published++; }
     }
     return published;
@@ -110,18 +116,30 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
   // ── dashboard
   async kpis(now = Date.now()) {
     const date = utcDay(now);
-    const [snap, meds, mins, subs, founding, flagged] = await Promise.all([
+    const [snap, meds, mins, subs, founding, flagged, silence, runs] = await Promise.all([
       this.live.snapshot(date), this.redis.get(K.medsToday(date)), this.redis.get(K.minsToday(date)),
       this.subscriptionCounts(),
       this.db.select().from(offers).where(eq(offers.id, 'founding')).then((r) => r[0]),
       this.db.select({ n: sql<number>`count(*)::int` }).from(dedications).where(NEEDS_REVIEW).then((r) => r[0]?.n ?? 0),
+      this.live.silence(now).then((r) => r.people).catch(() => 0),
+      this.sevenDayRuns(),
     ]);
     return {
       liveNow: snap.total ?? 0, meditationsToday: Number(meds) || 0, minutesToday: Number(mins) || 0,
       payingMembers: subs.paying, inTrial: subs.trial, mrrUsd: subs.mrrUsd,
       founding: { taken: founding?.taken ?? 0, cap: founding?.cap ?? 0, open: !!founding?.open && (founding.taken < founding.cap) },
-      moderationOpen: flagged, at: now,
+      moderationOpen: flagged, silenceNow: silence, streaks7: runs, at: now,
     };
+  }
+
+  /** People who sat on each of the last 7 days (cached 5 min). */
+  private async sevenDayRuns() {
+    const hit = await this.redis.get('dash:runs7');
+    if (hit !== null) return Number(hit);
+    const r = await this.db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM (SELECT user_id FROM user_daily_stats WHERE local_date >= (now() AT TIME ZONE 'UTC')::date - 6 AND meditations > 0 GROUP BY user_id HAVING count(*) = 7) x`);
+    const n = r.rows[0]?.n ?? 0;
+    await this.redis.set('dash:runs7', String(n), 'EX', 300);
+    return n;
   }
 
   /** Active members by product (cached 30 s). Trials are not revenue yet. */

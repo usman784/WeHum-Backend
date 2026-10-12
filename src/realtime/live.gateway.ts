@@ -26,8 +26,9 @@ export const MAX_ROOMS = 4;
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => { const t = Date.parse(d); return !Number.isNaN(t) && new Date(t).toISOString().startsWith(d); }, 'Invalid date');
 const RoomJoin = z.object({ room: z.string().max(60) }).strict();
 /** today | world | motd:{date} | session:{uuid} | lobby:{date} */
-const validRoom = (room: string) => room === 'today' || room === 'world'
-  || (/^(motd|lobby):/.test(room) && date.safeParse(room.slice(room.indexOf(':') + 1)).success)
+const validRoom = (room: string) => room === 'today' || room === 'world' || room === 'silence'
+  || (/^motd:/.test(room) && date.safeParse(room.slice(room.indexOf(':') + 1)).success)
+  || (/^lobby:/.test(room) && slot.safeParse(room.slice(6)).success)
   || (room.startsWith('session:') && z.string().uuid().safeParse(room.slice(8)).success)
   || /^gratitude:(gratitude|affirmation|love)$/.test(room);
 const TimeSync = z.object({ t0: z.number() }).strict();
@@ -36,7 +37,9 @@ const PresenceStart = z.object({
   lengthMin: z.number().int().min(1).max(180).optional(), mode: z.enum(['solo', 'group', 'silence']),
 }).strict();
 const MeditationRef = z.object({ meditationId: z.string().uuid() }).strict();
-const LobbyRef = z.object({ date }).strict();
+/** A lobby is identified by a slot: the date (daily sit) or date + UTC hour (`2026-10-12T08`, hourly sit). */
+const slot = z.string().regex(/^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]))?$/).refine((d) => date.safeParse(d.slice(0, 10)).success, 'Invalid date');
+const LobbyRef = z.object({ date: slot }).strict();
 const Refresh = z.object({ token: z.string().min(20).max(4096) }).strict();
 
 interface LiveSocketData { user: { id: string; isGuest: boolean; country: string | null }; installId?: string; exp: number; rooms: Set<string>; lobbies: Set<string>; clear?: () => void }
@@ -146,6 +149,7 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   /** Sends the current state of a room right after joining, so the screen is never empty until the next tick. */
   private async snapshotFor(socket: LiveSocket, room: string) {
     if (room === 'today' || room === 'world') socket.emit('live:agg', await this.live.snapshot(utcToday()));
+    else if (room === 'silence') { const s = await this.live.silence(); socket.emit('silence:live', { people: s.people, belts: s.belts, quiet: s.quiet, at: s.at }); }
     else if (room.startsWith('session:')) socket.emit('session:live', { sessionId: room.slice(8), ...(await this.presence.sessionLive(room.slice(8))) });
     else if (room.startsWith('motd:')) socket.emit('motd:stats', { date: room.slice(5), practicedToday: await this.redis.scard(K.practiced(room.slice(5))) });
   }
@@ -182,7 +186,7 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   lobbyLeave(@ConnectedSocket() socket: LiveSocket, @MessageBody() body: unknown) { return safely(() => this.leaveLobby(socket, LobbyRef.parse(body).date)); }
 
   private async joinLobby(socket: LiveSocket, d: string) {
-    if (d < addDaysIso(utcToday(), -1) || d > addDaysIso(utcToday(), 1)) return fail('VALIDATION_FAILED', { fields: ['date'] });
+    if (d.slice(0, 10) < addDaysIso(utcToday(), -1) || d.slice(0, 10) > addDaysIso(utcToday(), 1)) return fail('VALIDATION_FAILED', { fields: ['date'] });
     if (!(await this.entitlements.isActive(socket.data.user.id))) return fail('PREMIUM_REQUIRED'); // group meditation is part of the membership
     if (!socket.data.lobbies.has(d) && socket.data.rooms.size + socket.data.lobbies.size >= MAX_ROOMS) return fail('ROOM_LIMIT');
     await this.lobby.join(d, socket.data.user.id, socket.data.user.country);

@@ -1,15 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, lt, ne, or, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { z } from 'zod';
 import { AppError } from '../../common/errors';
 import type { AppUser } from '../../common/auth';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
-import { meditations, sessions, users } from '../../db/schema';
+import { meditations, sessionKudos, sessions, userDailyStats, users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { K, REDIS } from '../../infra/redis';
 import { QUEUES, QueueService } from '../../jobs/queues';
-import { ConfigService } from '../config/config.service';
+import { ConfigService, type MainConfig } from '../config/config.service';
+import { ProgressService } from '../me/progress.service';
+import { computeStreak } from '../me/streak';
 import { EntitlementService } from '../entitlements/entitlement.service';
 import { LiveService } from '../live/live.service';
 import { HIDDEN_COUNTRY } from '../../realtime/presence.service';
@@ -26,6 +28,9 @@ export const MeditationDto = z.object({
   durationSec: z.number().int().min(1).max(4 * 3600),
   completed: z.boolean().default(false),
   offline: z.boolean().default(false),
+  /** Optional heart-rate readings from Apple Health / Health Connect (device-side, behind `features.heartRate`). */
+  hrDeltaBpm: z.number().int().min(-60).max(60).nullish(),
+  hrAvgBpm: z.number().int().min(30).max(220).nullish(),
 }).strict();
 export type MeditationInput = z.infer<typeof MeditationDto>;
 export const BatchDto = z.object({ items: z.array(MeditationDto).min(1).max(100) }).strict();
@@ -36,7 +41,7 @@ const TTL_3D = 3 * 86_400;
 export class MeditationsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly queues: QueueService,
-    private readonly live: LiveService, private readonly entitlements: EntitlementService, private readonly config: ConfigService,
+    private readonly live: LiveService, private readonly entitlements: EntitlementService, private readonly config: ConfigService, private readonly progress: ProgressService,
   ) {}
 
   /**
@@ -58,6 +63,7 @@ export class MeditationsService {
     const [row] = await this.db.insert(meditations).values({
       id: b.id, userId: user.id, sessionId: sess?.id ?? null, recipeId: b.recipeId ?? null, kind: b.kind, lengthVariant: b.lengthVariant ?? null,
       startedAt, endedAt, durationSec: b.durationSec, counted, completed: b.completed, offline: b.offline, localDate: date, country: u.country,
+      hrDeltaBpm: b.hrDeltaBpm ?? null, hrAvgBpm: b.hrAvgBpm ?? null,
     }).onConflictDoNothing({ target: meditations.id }).returning();
 
     let created = true, out = row;
@@ -84,14 +90,44 @@ export class MeditationsService {
 
   /** `isGuest` comes from the database: the token claim is stale for up to 15 minutes after the user links an account. */
   private async result(user: AppUser, m: typeof meditations.$inferSelect, isGuest: boolean) {
-    const [snap, member, mod] = await Promise.all([this.live.snapshot(m.localDate), this.entitlements.isActive(user.id), this.config.value<{ dailyLimit: number }>('moderation')]);
+    const dayStart = new Date(`${m.localDate}T00:00:00Z`);
+    const [snap, member, mod, main, prof] = await Promise.all([
+      this.live.snapshot(m.localDate), this.entitlements.isActive(user.id), this.config.value<{ dailyLimit: number }>('moderation'),
+      this.config.value<MainConfig>('main'), this.progress.profile(user.id),
+    ]);
     const used = Number(await this.redis.get(K.dedLimit(user.id, m.localDate)).catch(() => 0)) || 0;
+
+    // payoff numbers (Stitch): streak with this sit included, who finished the same meditation today
+    const [dates, [other], [fin]] = await Promise.all([
+      this.db.select({ d: userDailyStats.localDate }).from(userDailyStats).where(and(eq(userDailyStats.userId, user.id), gt(userDailyStats.meditations, 0))),
+      this.db.select({ n: sql<number>`count(*)::int` }).from(meditations).where(and(eq(meditations.userId, user.id), eq(meditations.localDate, m.localDate), eq(meditations.counted, true), ne(meditations.id, m.id))),
+      m.sessionId
+        ? this.db.select({ n: sql<number>`count(distinct ${meditations.userId})::int` }).from(meditations).where(and(eq(meditations.sessionId, m.sessionId), eq(meditations.completed, true), eq(meditations.counted, true), sql`${meditations.startedAt} >= ${dayStart}`))
+        : Promise.resolve([{ n: 0 }]),
+    ]);
+    const streak = main.features?.streaks === false ? null : computeStreak(m.counted ? [...dates.map((x) => x.d), m.localDate] : dates.map((x) => x.d), m.localDate, { weeklyGoal: prof.weeklyGoal });
+    const minutesToday = Number(await this.redis.get(K.minsToday(m.localDate)).catch(() => 0)) || 0;
     return {
       id: m.id, counted: m.counted, localDate: m.localDate,
       canDedicate: m.counted && m.completed && !!m.sessionId && member && !isGuest && used < mod.dailyLimit,
       dedicationsLeftToday: Math.max(0, mod.dailyLimit - used),
-      together: { people: snap.total ?? 0, countries: snap.countries ?? 0 },
+      together: { people: snap.total ?? 0, countries: snap.countries ?? 0, belts: snap.belts ?? null, top: snap.top.slice(0, 8), minutesToday },
+      finishers: { completed: fin?.n ?? 0 },
+      streak: streak && { current: streak.current, record: streak.record, extended: m.counted && (other?.n ?? 0) === 0, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone, daysToGoal: streak.daysToGoal },
+      heartRate: m.hrDeltaBpm == null ? null : { deltaBpm: m.hrDeltaBpm, avgBpm: m.hrAvgBpm },
     };
+  }
+
+  /** "Send kudos to all": once per person, meditation and day, and only after finishing it that day. */
+  async kudos(user: AppUser, sessionId: string) {
+    const [u] = await this.db.select({ tz: users.timezone }).from(users).where(eq(users.id, user.id));
+    const today = localDate(new Date(), u?.tz ?? 'UTC');
+    const [m] = await this.db.select({ id: meditations.id }).from(meditations)
+      .where(and(eq(meditations.userId, user.id), eq(meditations.sessionId, sessionId), eq(meditations.completed, true), eq(meditations.counted, true), eq(meditations.localDate, today))).limit(1);
+    if (!m) throw new AppError('MEDITATION_REQUIRED', 'Finish this meditation first');
+    await this.db.insert(sessionKudos).values({ userId: user.id, sessionId, localDate: today }).onConflictDoNothing();
+    const [c] = await this.db.select({ n: sql<number>`count(*)::int` }).from(sessionKudos).where(and(eq(sessionKudos.sessionId, sessionId), eq(sessionKudos.localDate, today)));
+    return { sent: true, count: c?.n ?? 1 };
   }
 
   /** Offline sync (≤ 100): one result per item, a bad item never blocks the others. */

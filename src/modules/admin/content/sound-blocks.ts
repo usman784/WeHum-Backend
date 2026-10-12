@@ -18,8 +18,10 @@ const kind = z.enum(['opening', 'core', 'closing', 'sound', 'bell', 'loop']);
 const CreateDto = z.object({
   kind, name: z.string().trim().min(1).max(80), mediaId: uuidDto, loopable: z.boolean().default(false),
   access: z.enum(['free', 'premium']).default('premium'), visible: z.boolean().default(true),
+  /** Bells only: where the Silence Room offers it. */
+  bellRole: z.enum(['opening', 'interval', 'closing']).nullable().optional(),
 }).strict();
-const PatchDto = z.object({ name: z.string().trim().min(1).max(80), mediaId: uuidDto, loopable: z.boolean(), access: z.enum(['free', 'premium']), visible: z.boolean(), kind }).partial().strict();
+const PatchDto = z.object({ name: z.string().trim().min(1).max(80), mediaId: uuidDto, loopable: z.boolean(), access: z.enum(['free', 'premium']), visible: z.boolean(), kind, bellRole: z.enum(['opening', 'interval', 'closing']).nullable() }).partial().strict();
 const OrderDto = z.object({ ids }).strict();
 const ListQuery = z.object({ kind: kind.optional() });
 type Row = typeof soundBlocks.$inferSelect;

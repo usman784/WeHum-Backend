@@ -6,6 +6,8 @@ import type Redis from 'ioredis';
 import { z } from 'zod';
 import { AdminRoles } from '../../common/auth';
 import { AppError } from '../../common/errors';
+import { computeStreak } from '../me/streak';
+import { localDate } from '../meditations/meditation.rules';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
 import { Zod } from '../../common/zod';
 import { users } from '../../db/schema';
@@ -103,11 +105,15 @@ export class UsersAdminService {
       q(sql`SELECT created_at FROM auth_identities WHERE user_id = ${id} AND provider <> 'device' ORDER BY created_at LIMIT 1`),
     ]);
     const e = ent[0] ?? null;
+    const days = await q(sql`SELECT local_date::text AS d, minutes FROM user_daily_stats WHERE user_id = ${id} AND meditations > 0 ORDER BY local_date`);
+    const streak = computeStreak(days.map((r) => r.d), localDate(new Date(), u.timezone ?? 'UTC'), { weeklyGoal: u.weekly_goal ?? 5 });
+    const hr = (await q(sql`SELECT count(*)::int AS n FROM meditations WHERE user_id = ${id} AND hr_delta_bpm IS NOT NULL`))[0]?.n ?? 0;
     const st = stats[0] ?? { minutes_total: 0, meditations_total: 0, group_total: 0 };
     const saved = firstIdentity[0]?.created_at ? new Date(firstIdentity[0].created_at) : null;
     return {
       id: u.id, name: u.first_name, email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
       providers: [...new Set(ids.filter((i) => i.provider !== 'device').map((i) => i.provider))],
+      streak: { current: streak.current, record: streak.record, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone }, heartRateReadings: hr,
       accountSavedAt: saved, wasGuestDays: saved ? Math.max(0, Math.round((saved.getTime() - new Date(u.created_at).getTime()) / 86_400_000)) : null,
       devices: devs.map((d) => ({ platform: d.platform, model: d.model, appVersion: d.app_version, lastSeenAt: d.last_seen_at })),
       reminder: { enabled: u.reminder_enabled, time: u.reminder_time, timezone: u.timezone, groupWarning: u.group_warning, dailyMessagePush: u.daily_message_push },

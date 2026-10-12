@@ -6,6 +6,7 @@ import { AppError } from '../../common/errors';
 import type { AppUser } from '../../common/auth';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
 import { dedicationHolds, dedications, meditations, reports, sessions, userBlocks, users } from '../../db/schema';
+import { placeLabel } from './place';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { RealtimeBus } from '../../infra/realtime-bus';
 import { K, REDIS } from '../../infra/redis';
@@ -22,7 +23,13 @@ const DAY_MS = 86_400_000;
 export const NEEDS_REVIEW = sql`(${dedications.status} = 'flagged' or (${dedications.status} = 'hidden' and ${dedications.moderatedAt} is null and ${dedications.reportCount} > 0))`;
 
 /** What the app shows of a dedication. No user id: people are first name + country only. */
-export const toView = (d: Row, holding = false) => ({ id: d.id, firstName: d.firstName, country: d.country, text: d.text, holdingCount: d.holdingCount, holding, createdAt: d.createdAt.toISOString() });
+export const toView = (d: Row, holding = false) => ({
+  id: d.id, firstName: d.firstName, country: d.country, place: d.place, author: d.authorKind === 'teacher' ? { kind: 'teacher' as const, role: 'Teacher' } : { kind: 'user' as const },
+  text: d.text, holdingCount: d.holdingCount, holding, createdAt: d.createdAt.toISOString(),
+});
+
+/** Fixed id of the account that Raphael's posts from the CMS are written under (created on first use). */
+export const TEACHER_USER_ID = '00000000-0000-7000-8000-00000000a1f4';
 
 @Injectable()
 export class CommunityService {
@@ -38,7 +45,7 @@ export class CommunityService {
   async announceCount() { await this.bus.publish('moderation:count', { open: await this.openCount() }); }
 
   // ───────────── app: post
-  async post(user: AppUser, b: { meditationId: string; text: string }) {
+  async post(user: AppUser, b: { meditationId: string; text: string; locationMode?: 'city' | 'worldwide' }) {
     const rules = await this.rules();
     const [m] = await this.db.select().from(meditations).where(and(eq(meditations.id, b.meditationId), eq(meditations.userId, user.id)));
     if (!m || !m.counted || !m.completed || !m.sessionId || Date.now() - m.endedAt.getTime() > DAY_MS) throw new AppError('MEDITATION_REQUIRED', 'Finish a meditation first');
@@ -62,7 +69,7 @@ export class CommunityService {
     try {
       [row] = await this.db.insert(dedications).values({
         id: uuidv7(), sessionId: m.sessionId, userId: user.id, meditationId: m.id, firstName: u.firstName?.trim() || 'Someone',
-        country: u.showCountry ? u.country : null, text, status, autoFlags: flags,
+        country: u.showCountry ? u.country : null, place: b.locationMode === 'city' && u.showCountry ? placeLabel(u.timezone, u.country) : null, text, status, autoFlags: flags,
       }).returning() as [Row];
     } catch (e) {
       await this.redis.decr(limitKey);
@@ -97,6 +104,42 @@ export class CommunityService {
   async preview(sessionId: string) {
     const rows = await this.db.select().from(dedications).where(and(eq(dedications.sessionId, sessionId), eq(dedications.status, 'visible'))).orderBy(desc(dedications.createdAt)).limit(3);
     return rows.map((r) => toView(r));
+  }
+
+  /** Everyone's recent dedications (Together "Shared intent"), blocked people left out. */
+  async feed(user: AppUser, q: { cursor?: string; limit?: number }) {
+    const limit = clampLimit(q.limit, 20);
+    const c = decodeCursor(q.cursor);
+    const conds: SQL[] = [eq(dedications.status, 'visible'), sql`not exists (select 1 from ${userBlocks} b where b.blocker_id = ${user.id} and b.blocked_id = ${dedications.userId})`];
+    if (c) conds.push(or(lt(dedications.createdAt, new Date(String(c.k))), and(eq(dedications.createdAt, new Date(String(c.k))), lt(dedications.id, c.id)))!);
+    const rows = await this.db.select({ d: dedications, title: sessions.title }).from(dedications).innerJoin(sessions, eq(sessions.id, dedications.sessionId))
+      .where(and(...conds)).orderBy(desc(dedications.createdAt), desc(dedications.id)).limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const held = page.length ? await this.db.select({ id: dedicationHolds.dedicationId }).from(dedicationHolds).where(and(eq(dedicationHolds.userId, user.id), inArray(dedicationHolds.dedicationId, page.map((r) => r.d.id)))) : [];
+    const mine = new Set(held.map((h) => h.id));
+    return {
+      data: page.map((r) => ({ ...toView(r.d, mine.has(r.d.id)), sessionId: r.d.sessionId, sessionTitle: r.title })),
+      meta: { nextCursor: rows.length > limit ? encodeCursor(page.at(-1)!.d.createdAt.toISOString(), page.at(-1)!.d.id) : null },
+    };
+  }
+
+  /** Data & privacy: remove the name and place from everything this person wrote. The text stays (it is not personal data on its own). */
+  async anonymize(userId: string) {
+    const rows = await this.db.update(dedications).set({ firstName: 'Someone', country: null, place: null }).where(eq(dedications.userId, userId)).returning({ id: dedications.id });
+    return { count: rows.length };
+  }
+
+  /** How many people sit in the same hour as `time` (their daily reminder). A real count, cached 60 s. */
+  async membersAt(time: string) {
+    const hour = time.slice(0, 2);
+    const key = `members-at:${hour}`;
+    const hit = await this.redis.get(key).catch(() => null);
+    if (hit !== null) return { time, count: Number(hit) };
+    const [r] = await this.db.select({ n: sql<number>`count(*)::int` }).from(users)
+      .where(and(eq(users.reminderEnabled, true), sql`${users.deletedAt} is null`, sql`left(${users.reminderTime}, 2) = ${hour}`));
+    const count = r?.n ?? 0;
+    await this.redis.set(key, String(count), 'EX', 60).catch(() => null);
+    return { time, count };
   }
 
   // ───────────── app: holds, reports
@@ -207,6 +250,22 @@ export class CommunityService {
       if ((h?.n ?? 0) >= rules.muteAfterHides) autoMuted = !!(await this.db.update(users).set({ mutedAt: new Date() }).where(and(eq(users.id, cur.userId), sql`${users.mutedAt} is null`)).returning()).length;
     }
     return { before: cur.status, after: next, userId: cur.userId, autoMuted };
+  }
+
+  /** Raphael posts a dedication from the CMS: shown as "Raphael · Teacher". Attached to the given session, or the newest live meditation. */
+  async postAsTeacher(text: string, sessionId?: string) {
+    const clean = text.trim().replace(/\s+/g, ' ');
+    if (!clean || clean.length > 200) throw new AppError('VALIDATION_FAILED', 'Between 1 and 200 characters', { fields: [{ path: 'text', message: 'Between 1 and 200 characters' }] });
+    const [s] = sessionId
+      ? await this.db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, sessionId))
+      : await this.db.select({ id: sessions.id }).from(sessions).where(and(eq(sessions.status, 'live'), eq(sessions.isSos, false))).orderBy(desc(sessions.publishAt)).limit(1);
+    if (!s) throw new AppError('NOT_FOUND', 'No meditation to attach the post to');
+    await this.db.insert(users).values({ id: TEACHER_USER_ID, firstName: 'Raphael', isGuest: false, showCountry: false }).onConflictDoNothing();
+    const [row] = await this.db.insert(dedications).values({
+      id: uuidv7(), sessionId: s.id, userId: TEACHER_USER_ID, meditationId: uuidv7(), firstName: 'Raphael', country: null, place: null, authorKind: 'teacher', text: clean, status: 'visible', autoFlags: [],
+    }).returning();
+    await this.bus.publish('dedication:new', { sessionId: row!.sessionId, items: [toView(row!)] });
+    return toView(row!);
   }
 
   async setMuted(userId: string, muted: boolean) {

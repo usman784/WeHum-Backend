@@ -3,6 +3,8 @@ import { JobsModule } from '../jobs/jobs.module';
 import { RealtimeCoreModule } from '../realtime/realtime.module';
 import { AuthModule } from './auth/auth.module';
 import { ContentModule } from './catalog/content.module';
+import { LibraryController } from './catalog/library.controller';
+import { LibraryService } from './catalog/library.service';
 import { LiveController } from './live/live.controller';
 import { ProgressController } from './me/progress.controller';
 import { ProgressService } from './me/progress.service';
@@ -18,8 +20,8 @@ import { TodayService } from './today/today.service';
 /** P4: what a user does every day: Today, bootstrap, meditations, progress, programs, recipes. */
 @Module({
   imports: [AuthModule, ContentModule, JobsModule, RealtimeCoreModule],
-  controllers: [TodayController, LiveController, MeditationsController, ProgressController, ProgramsController, RecipesController],
-  providers: [TodayService, MeditationsService, ProgressService, ProgramsUserService, RecipesService],
+  controllers: [TodayController, LiveController, LibraryController, MeditationsController, ProgressController, ProgramsController, RecipesController],
+  providers: [TodayService, MeditationsService, ProgressService, ProgramsUserService, RecipesService, LibraryService],
   exports: [ProgressService],
 })
 export class ActivityModule {}

@@ -1,9 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
-import { userDailyStats, userStats, users } from '../../db/schema';
+import { and, asc, eq, gt, gte, isNotNull, lte, sql } from 'drizzle-orm';
+import { meditations, userDailyStats, userStats, users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { localDate } from '../meditations/meditation.rules';
 import { addDaysIso } from '../motd/motd.service';
+import { computeStreak } from './streak';
 
 export type Period = 'week' | 'month' | 'year' | 'all';
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -13,7 +14,7 @@ const daysIn = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate(
 const isoDow = (d: string) => (new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7;
 export const weekStart = (d: string) => addDaysIso(d, -isoDow(d));
 
-/** Progress, not streaks (spec §1.2): minutes, meditations, group meditations and days — read from `user_daily_stats` only. */
+/** Minutes, meditations, group sits and days, read from `user_daily_stats`; the forgiving streak is computed from the same rows (Stitch, D2). */
 @Injectable()
 export class ProgressService {
   constructor(@Inject(DRIZZLE) private readonly db: DB) {}
@@ -80,4 +81,31 @@ export class ProgressService {
   }
 
   async tz(userId: string) { return (await this.db.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)))[0]?.tz ?? 'UTC'; }
+
+  /** Time zone and weekly goal in one read. */
+  async profile(userId: string) {
+    const [u] = await this.db.select({ tz: users.timezone, weeklyGoal: users.weeklyGoal }).from(users).where(eq(users.id, userId));
+    return { tz: u?.tz ?? 'UTC', weeklyGoal: u?.weeklyGoal ?? 5 };
+  }
+
+  /** Current run, record, grace and the Monday–Sunday strip for the user's local week. */
+  async streak(userId: string, tz: string, weeklyGoal: number, graceDays = 1, now = new Date()) {
+    const today = localDate(now, tz);
+    const rows = await this.db.select({ date: userDailyStats.localDate, minutes: userDailyStats.minutes }).from(userDailyStats)
+      .where(and(eq(userDailyStats.userId, userId), gt(userDailyStats.meditations, 0))).orderBy(asc(userDailyStats.localDate));
+    return computeStreak(rows.map((r) => r.date), today, { weeklyGoal, graceDays, minutesByDate: new Map(rows.map((r) => [r.date, r.minutes])) });
+  }
+
+  /** Lifetime numbers for the You tab. `hrShiftBpm` is the mean heart-rate change over sits that had a reading (null if none). */
+  async lifetime(userId: string) {
+    const [[st], [hr]] = await Promise.all([
+      this.db.select({ minutes: userStats.minutesTotal, meditations: userStats.meditationsTotal, group: userStats.groupTotal }).from(userStats).where(eq(userStats.userId, userId)),
+      this.db.select({ avg: sql<string | null>`avg(${meditations.hrDeltaBpm})` }).from(meditations).where(and(eq(meditations.userId, userId), isNotNull(meditations.hrDeltaBpm))),
+    ]);
+    const sits = st?.meditations ?? 0, minutes = st?.minutes ?? 0, together = st?.group ?? 0;
+    return {
+      sits, minutes, together, togetherPct: sits ? Math.round((together / sits) * 100) : 0,
+      avgMin: sits ? Math.round((minutes / sits) * 10) / 10 : 0, hrShiftBpm: hr?.avg == null ? null : Math.round(Number(hr.avg)),
+    };
+  }
 }

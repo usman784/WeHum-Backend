@@ -2,12 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { AppError } from '../../common/errors';
-import { dedications, programDays, programProgress, programs, sessions, soundBlocks, teachers, themes } from '../../db/schema';
+import { dedications, mediaAssets, programDays, programProgress, programs, sessions, soundBlocks, teachers, themes } from '../../db/schema';
 import { CdnSigner } from '../../infra/cdn';
 import { CacheService } from '../../infra/cache';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { K, REDIS } from '../../infra/redis';
-import { ConfigService } from '../config/config.service';
+import { ConfigService, type CrisisConfig } from '../config/config.service';
 import { MotdService } from '../motd/motd.service';
 import { coverMap, toCover, toSessionSummary } from './catalog.mapper';
 
@@ -60,6 +60,8 @@ export class CatalogService {
       this.config.value<Record<string, unknown>>('sos'),
     ]);
     const covers = await coverMap(this.db, [...se.map((s) => s.coverMediaId), ...pr.map((p) => p.coverMediaId)]);
+    const mediaIds = se.map((s) => s.mediaId).filter((i): i is string => !!i);
+    const sizes = new Map<string, number>(mediaIds.length ? (await this.db.select({ id: mediaAssets.id, bytes: mediaAssets.bytes }).from(mediaAssets).where(inArray(mediaAssets.id, mediaIds))).map((r) => [r.id, r.bytes] as [string, number]) : []);
     const liveIds = new Set(se.map((s) => s.id));
     const daysBy = new Map<string, { day: number; sessionId: string; title: string | null }[]>();
     for (const d of pd) if (liveIds.has(d.sessionId)) (daysBy.get(d.programId) ?? daysBy.set(d.programId, []).get(d.programId)!).push({ day: d.day, sessionId: d.sessionId, title: d.title });
@@ -69,7 +71,7 @@ export class CatalogService {
       version,
       themes: th.map((t) => ({ id: t.id, slug: t.slug, name: t.name, subtitle: t.subtitle, description: t.description, iconKey: t.iconKey, order: t.order })),
       teachers: te.map((t) => this.teacher(t)),
-      sessions: library.map((s) => toSessionSummary(s, this.cdn, covers)),
+      sessions: library.map((s) => toSessionSummary(s, this.cdn, covers, sizes)),
       programs: pr.map((p) => ({
         id: p.id, slug: p.slug, title: p.title, description: p.description, access: p.access, unlockRule: p.unlockRule,
         cover: toCover(this.cdn, covers, p.coverMediaId, p.coverUrl), days: daysBy.get(p.id) ?? [],
@@ -94,9 +96,9 @@ export class CatalogService {
 
   private sosPayload(cfg: Record<string, unknown>, rows: (typeof sessions.$inferSelect)[], covers: Awaited<ReturnType<typeof coverMap>>) {
     return {
-      title: cfg.title, subtitle: cfg.subtitle, help: cfg.help,
+      title: cfg.title, subtitle: cfg.subtitle, help: cfg.help, soundBeds: (cfg.soundBeds as string[] | undefined) ?? [],
       tiles: rows.sort((a, b) => (a.sosOrder ?? 0) - (b.sosOrder ?? 0) || a.id.localeCompare(b.id)).map((s) => ({
-        sessionId: s.id, feeling: s.sosFeeling ?? s.title, subtitle: s.sosSubtitle, durationSec: s.durationSec, access: s.access, cover: toCover(this.cdn, covers, s.coverMediaId, s.coverUrl),
+        sessionId: s.id, feeling: s.sosFeeling ?? s.title, subtitle: s.sosSubtitle, durationSec: s.durationSec, durationMin: Math.max(1, Math.round(s.durationSec / 60)), access: s.access, cover: toCover(this.cdn, covers, s.coverMediaId, s.coverUrl),
       })),
     };
   }
@@ -104,6 +106,18 @@ export class CatalogService {
   async sos(catalogVersion: number) {
     const snap = (await this.snapshot(catalogVersion)) as { sos: unknown };
     return snap.sos;
+  }
+
+  /** Crisis directory (Stitch): lines for the person's region, the other regions to switch to, international numbers and the grounding tip. */
+  async crisisDirectory(country?: string | null) {
+    const cfg = await this.config.value<CrisisConfig>('crisis');
+    const code = country?.toUpperCase();
+    const region = cfg.regions.find((r) => code && r.countries.includes(code)) ?? cfg.regions.find((r) => r.code === cfg.defaultRegion) ?? cfg.regions[0];
+    if (!region) throw new AppError('NOT_FOUND', 'No crisis directory configured');
+    return {
+      region: { code: region.code, name: region.name }, regions: cfg.regions.map((r) => ({ code: r.code, name: r.name })),
+      availability: 'Available 24/7 · Free · Confidential', lines: region.lines, international: cfg.international, tip: cfg.tip,
+    };
   }
 
   /** Cache key includes the catalog version, so any content change (which bumps it) invalidates detail caches. */

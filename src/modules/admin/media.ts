@@ -123,13 +123,27 @@ export class MediaAdminService {
     return { id, status: 'processing' as const, jobId };
   }
 
+  /** (Re)generates the 30-second preview clip of a processed audio file. */
+  async makePreview(actor: Actor, id: string) {
+    const [m] = await this.db.select().from(mediaAssets).where(eq(mediaAssets.id, id));
+    if (!m) throw new AppError('NOT_FOUND', 'Media not found');
+    if (m.kind !== 'audio' || m.status !== 'ready') throw new AppError('INVALID_STATE', 'Only processed audio can have a preview');
+    const jobId = uuid();
+    await this.writer.run(actor, { action: 'media.preview', type: 'media', id }, async (tx) => {
+      await tx.insert(jobs).values({ id: jobId, type: 'media_transcode', status: 'queued', payload: { mediaId: id, preview: true }, createdBy: actor.id });
+      return { result: null, after: { jobId } };
+    });
+    await this.queues.add(QUEUES.media, 'preview', { mediaId: id, jobId }, { jobId: `preview-${id}-${Date.now()}`, attempts: 2, backoff: { type: 'fixed', delay: 5000 } });
+    return { id, jobId };
+  }
+
   async get(id: string) {
     const [m] = await this.db.select().from(mediaAssets).where(eq(mediaAssets.id, id));
     if (!m) throw new AppError('NOT_FOUND', 'Media not found');
     const [job] = await this.db.select().from(jobs).where(sql`${jobs.payload}->>'mediaId' = ${id}`).orderBy(desc(jobs.createdAt)).limit(1);
     const ready = m.status === 'ready';
     return {
-      id: m.id, kind: m.kind, name: m.originalName, mime: m.mime, bytes: m.bytes, status: m.status, error: m.error, durationSec: m.durationSec,
+      id: m.id, kind: m.kind, name: m.originalName, mime: m.mime, bytes: m.bytes, status: m.status, error: m.error, durationSec: m.durationSec, hasPreview: !!m.previewKey,
       loudnessLufs: m.loudnessLufs === null ? null : Number(m.loudnessLufs), width: m.width, height: m.height, blurhash: m.blurhash, createdAt: m.createdAt.toISOString(),
       // short-lived preview for the CMS player / thumbnails
       previewUrl: ready ? (m.kind === 'image' ? this.cdn.publicUrl(m.storageKey) : this.cdn.signedUrl(m.storageKey, 3600).url) : null,
@@ -156,6 +170,9 @@ export class MediaAdminController {
 
   @HttpCode(204) @Delete('uploads/:id')
   async cancel(@CurrentActor() a: Actor, @Param('id', new Zod(IdParam)) id: string) { await this.media.cancel(a, id); }
+
+  @HttpCode(202) @Post(':id/preview')
+  preview(@CurrentActor() a: Actor, @Param('id', new Zod(IdParam)) id: string) { return this.media.makePreview(a, id); }
 
   @Get(':id') get(@Param('id', new Zod(IdParam)) id: string) { return this.media.get(id); }
 }

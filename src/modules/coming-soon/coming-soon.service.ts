@@ -6,9 +6,13 @@ import type { AppUser } from '../../common/auth';
 import { AppError } from '../../common/errors';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
 import {
-  breathPatterns, challengeParticipants, challenges, dedications, gratitudePosts, gratitudeReports, sessions, userBlocks, userBreathPatterns,
+  breathPatterns, challengeParticipants, challenges, dedications, gratitudePosts, gratitudeReports, sessions, teachers, userBlocks, userBreathPatterns,
   userDailyStats, userMilestones, userStats, users,
 } from '../../db/schema';
+import { fromZonedTime } from 'date-fns-tz';
+import { beltsOf } from '../../common/belts';
+import { localDate } from '../meditations/meditation.rules';
+import { addDaysIso } from '../motd/motd.service';
 import { CdnSigner } from '../../infra/cdn';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { RealtimeBus } from '../../infra/realtime-bus';
@@ -62,7 +66,7 @@ export class ComingSoonService {
     const view = (c: (typeof list)[number]) => {
       const p = byId.get(c.id);
       return {
-        id: c.id, name: c.name, days: c.days, counts: c.counts, minMinutes: c.minMinutes, membersOnly: c.membersOnly,
+        id: c.id, name: c.name, blurb: c.blurb, days: c.days, counts: c.counts, minMinutes: c.minMinutes, membersOnly: c.membersOnly, graceDays: c.graceDays, startsAt: c.startsAt?.toISOString() ?? null, badgeName: c.badgeName,
         cover: c.coverMediaId && covers.get(c.coverMediaId) ? { url: this.cdn.publicUrl(covers.get(c.coverMediaId)!.key), blurhash: covers.get(c.coverMediaId)!.blurhash } : null,
         peopleInIt: active.get(c.id) ?? 0,
         me: p ? { joinedAt: p.joinedAt.toISOString(), completedDays: p.completedDays, lastDay: p.lastDay, finishedAt: p.finishedAt?.toISOString() ?? null } : null,
@@ -73,6 +77,47 @@ export class ComingSoonService {
       inProgress: all.filter((c) => c.me && !c.me.finishedAt),
       available: all.filter((c) => !c.me || c.me.finishedAt),
       finished: all.filter((c) => c.me?.finishedAt).map((c) => ({ id: c.id, name: c.name, days: c.days, finishedAt: c.me!.finishedAt })),
+    };
+  }
+
+  /**
+   * Cohort sprint detail (Stitch). Day N unlocks at `unlockTime` (the person's local time) N-1 days after the start
+   * (the cohort start date, or the day they joined). Progress still never resets: a missed day uses a grace day first,
+   * and `graceLeft` only says how many are left.
+   */
+  async challengeDetail(user: AppUser, id: string, now = new Date()) {
+    await this.require('challenges');
+    const [c] = await this.db.select().from(challenges).where(eq(challenges.id, id));
+    if (!c || c.status !== 'live') throw new AppError('NOT_FOUND', 'Challenge not found');
+    const [[me], [prof], lead, cohort, people] = await Promise.all([
+      this.db.select().from(challengeParticipants).where(and(eq(challengeParticipants.challengeId, id), eq(challengeParticipants.userId, user.id))),
+      this.db.select({ tz: users.timezone }).from(users).where(eq(users.id, user.id)),
+      c.leadTeacherId ? this.db.select({ name: teachers.name, role: teachers.role, specialty: teachers.specialty }).from(teachers).where(eq(teachers.id, c.leadTeacherId)).then((r) => r[0] ?? null) : Promise.resolve(null),
+      this.db.select({ n: sql<number>`count(*)::int` }).from(challengeParticipants).where(and(eq(challengeParticipants.challengeId, id), sql`${challengeParticipants.finishedAt} is null`)).then((r) => r[0]?.n ?? 0),
+      this.db.select({ c: users.country, n: sql<number>`count(*)::int` }).from(challengeParticipants).innerJoin(users, eq(users.id, challengeParticipants.userId))
+        .where(and(eq(challengeParticipants.challengeId, id), sql`${challengeParticipants.finishedAt} is null`, eq(users.showCountry, true), sql`${users.country} is not null`)).groupBy(users.country),
+    ]);
+    const tz = prof?.tz ?? 'UTC';
+    const base = c.startsAt && c.startsAt > (me?.joinedAt ?? new Date(0)) ? c.startsAt : me?.joinedAt ?? c.startsAt ?? now;
+    const startDay = localDate(base, tz);
+    const done = me?.completedDays ?? 0;
+    const sched = new Map((c.schedule as { day: number; title: string; minutes: number; summary?: string; sessionId?: string | null }[]).map((d) => [d.day, d]));
+    let unlocked = 0;
+    const days = Array.from({ length: c.days }, (_, i) => {
+      const day = i + 1, s = sched.get(day);
+      const unlocksAt = fromZonedTime(`${addDaysIso(startDay, i)}T${c.unlockTime}:00`, tz);
+      const open = unlocksAt.getTime() <= now.getTime();
+      if (open) unlocked = day;
+      const state = day <= done ? ('done' as const) : day === done + 1 && open ? ('today' as const) : ('locked' as const);
+      return { day, title: s?.title ?? `Day ${day}`, minutes: s?.minutes ?? null, summary: s?.summary ?? '', sessionId: s?.sessionId ?? null, state, unlocksAt: state === 'locked' ? unlocksAt.toISOString() : null };
+    });
+    const missed = Math.max(0, unlocked - 1 - done);
+    return {
+      id: c.id, name: c.name, blurb: c.blurb, days: c.days, counts: c.counts, minMinutes: c.minMinutes, membersOnly: c.membersOnly,
+      lead, badge: c.badgeName ? { name: c.badgeName } : null, unlockTime: c.unlockTime, startsAt: c.startsAt?.toISOString() ?? null,
+      graceDays: c.graceDays, graceLeft: Math.max(0, c.graceDays - missed), cohort: { active: cohort, belts: beltsOf(people.map((p) => ({ c: p.c!, n: p.n }))) },
+      schedule: days, joined: !!me && !me.finishedAt, finishedAt: me?.finishedAt?.toISOString() ?? null,
+      progress: { completedDays: done, days: c.days, pct: Math.round((done / c.days) * 100), remaining: Math.max(0, c.days - done) },
     };
   }
 

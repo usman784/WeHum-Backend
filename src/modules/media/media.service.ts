@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import type Redis from 'ioredis';
 import { AppError } from '../../common/errors';
+import { REDIS } from '../../infra/redis';
 import { dailyMessages, mediaAssets, motdVariants, sessions, soundBlocks } from '../../db/schema';
 import { CdnSigner } from '../../infra/cdn';
 import { DRIZZLE, type DB } from '../../infra/core.module';
@@ -16,7 +18,7 @@ export const PlayUrlBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('session'), id: z.string().uuid(), download: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal('motd'), date, lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]), download: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal('block'), id: z.string().uuid(), download: z.boolean().optional() }).strict(),
-  z.object({ kind: z.literal('daily_message'), date, download: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal('daily_message'), date, video: z.boolean().optional(), download: z.boolean().optional() }).strict(),
 ]);
 export type PlayUrlRequest = z.infer<typeof PlayUrlBody>;
 
@@ -33,7 +35,7 @@ export interface PlayUrl {
 /** Signed CDN URLs (spec §8.5). Premium content needs an active entitlement, checked server-side. */
 @Injectable()
 export class MediaService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB, private readonly cdn: CdnSigner, private readonly entitlements: EntitlementService) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly cdn: CdnSigner, private readonly entitlements: EntitlementService) {}
 
   async playUrl(userId: string, req: PlayUrlRequest): Promise<PlayUrl> {
     const download = !!req.download;
@@ -63,12 +65,42 @@ export class MediaService {
         return this.sign(b.mediaId, 'audio', download, b.durationSec);
       }
       case 'daily_message': {
-        await this.requirePremium(userId);
         const [m] = await this.db.select().from(dailyMessages).where(and(eq(dailyMessages.date, req.date), eq(dailyMessages.status, 'live')));
-        if (!m || !m.mediaId) throw new AppError('NOT_FOUND', 'No audio for this daily message');
+        if (!m) throw new AppError('NOT_FOUND', 'No daily message for this date');
+        if (m.access === 'premium') await this.requirePremium(userId);
+        if (download && m.access === 'free') throw new AppError('INVALID_STATE', 'This daily message cannot be downloaded');
+        if (req.video) {
+          const vid = m.type === 'video' ? m.mediaId : m.videoMediaId;
+          if (!vid) throw new AppError('NOT_FOUND', 'No video for this daily message');
+          return this.sign(vid, 'video', download, m.durationSec);
+        }
+        if (!m.mediaId) throw new AppError('NOT_FOUND', 'No audio for this daily message');
         return this.sign(m.mediaId, m.type === 'video' ? 'video' : 'audio', download, m.durationSec);
       }
     }
+  }
+
+  /**
+   * 30-second preview of a locked premium audio meditation (Stitch). Members just get the normal URL. For everyone else:
+   * the 30 s clip rendition when it exists (`enforced: 'clip'`), otherwise the file with a 10-minute URL and the app stops
+   * at `previewSec` (`enforced: 'client'`). At most 10 previews per person and day.
+   */
+  async previewUrl(userId: string, sessionId: string) {
+    const [s] = await this.db.select().from(sessions).where(and(eq(sessions.id, sessionId), sessionVisible()));
+    if (!s) throw new AppError('NOT_FOUND', 'Meditation not found');
+    if (s.type !== 'audio' || s.access !== 'premium' || !s.mediaId) throw new AppError('PREVIEW_NOT_AVAILABLE', 'This meditation has no preview');
+    if (await this.entitlements.isActive(userId)) return { ...(await this.sign(s.mediaId, 'audio', false, s.durationSec)), previewSec: null, enforced: null, fullAccess: true };
+    const key = `preview:${userId}:${new Date().toISOString().slice(0, 10)}`;
+    const n = await this.redis.incr(key).catch(() => 0);
+    if (n === 1) await this.redis.expire(key, 2 * 86_400).catch(() => 0);
+    if (n > 10) throw new AppError('RATE_LIMITED', 'You have used today\'s previews. Try again tomorrow.');
+    const [m] = await this.db.select().from(mediaAssets).where(eq(mediaAssets.id, s.mediaId));
+    if (!m || m.status !== 'ready') throw new AppError('MEDIA_NOT_READY', 'This meditation is still being prepared');
+    const clip = m.previewKey ? this.cdn.signedUrl(m.previewKey, 600) : null, main = clip ?? this.cdn.signedUrl(m.storageKey, 600);
+    return {
+      type: 'audio' as const, url: main.url, hlsUrl: null, youtubeId: null, mime: m.mime, durationSec: clip ? 30 : m.durationSec, expiresAt: main.expiresAt,
+      previewSec: 30, enforced: clip ? ('clip' as const) : ('client' as const), fullAccess: false, fullDurationSec: m.durationSec ?? s.durationSec,
+    };
   }
 
   private async requirePremium(userId: string) {

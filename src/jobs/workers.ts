@@ -30,7 +30,7 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
     if (this.workers.length) return;
     const conn = () => { const c = bullConnection(); this.conns.push(c); return c; };
     this.workers = [
-      new Worker(QUEUES.media, (job) => this.media.process(job.data.mediaId, job.data.jobId, job.attemptsMade + 1 >= (job.opts.attempts ?? 1)), { connection: conn(), concurrency: 2 }),
+      new Worker(QUEUES.media, (job) => job.name === 'preview' ? this.media.makePreview(job.data.mediaId, job.data.jobId) : this.media.process(job.data.mediaId, job.data.jobId, job.attemptsMade + 1 >= (job.opts.attempts ?? 1)), { connection: conn(), concurrency: 2 }),
       new Worker(QUEUES.stats, (job) => this.stats.apply(job.data.meditationId), { connection: conn(), concurrency: 8 }),
       new Worker(QUEUES.cron, async (job) => {
         if (job.name === 'catalog.publishDue') return this.publishDue.run();

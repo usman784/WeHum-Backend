@@ -8,7 +8,6 @@ import { K, REDIS } from '../infra/redis';
 import { QUEUES, QueueService } from '../jobs/queues';
 import { GroupService } from '../modules/today/group.service';
 import { metrics } from '../infra/metrics';
-import { addDaysIso } from '../modules/motd/motd.service';
 
 /** Look-ahead: group starts within this window get a delayed job (spec §8.1). */
 const WINDOW_MS = 16 * 60_000;
@@ -29,9 +28,8 @@ export class GroupStartService {
    */
   async schedule(now = Date.now()): Promise<string[]> {
     const queued: string[] = [];
-    const today = new Date(now).toISOString().slice(0, 10);
-    for (const date of [today, addDaysIso(today, 1)]) {
-      const g = await this.group.forDate(date, now);
+    for (const date of await this.group.slots(now)) {
+      const g = await this.group.forSlot(date, now);
       const startsAt = Date.parse(g.startsAt);
       if (startsAt < now - 5000 || startsAt - now > WINDOW_MS) continue;
       const jobId = `group-start-${date}-${startsAt}`;
@@ -43,16 +41,17 @@ export class GroupStartService {
 
   /** At T0: tell everyone in the lobby, snapshot the lobby size, drop the lobby. Stale jobs (time changed) do nothing. */
   async fire(date: string, expectedStartsAt: number, now = Date.now()): Promise<boolean> {
-    const g = await this.group.forDate(date, now);
+    const g = await this.group.forSlot(date, now);
     if (Math.abs(Date.parse(g.startsAt) - expectedStartsAt) > 1000) { this.log.log(`group ${date} was rescheduled; skipping stale start`); return false; }
     const first = await this.redis.set(`group:started:${date}:${expectedStartsAt}`, '1', 'EX', 3600, 'NX');
     if (first !== 'OK') return false; // already fired (a retried job)
     const wait = expectedStartsAt - Date.now();
     if (wait > 0 && wait <= 2 * LEAD_MS) await new Promise((r) => setTimeout(r, wait)); // on the dot (a manual call far ahead of T0 does not wait)
     metrics.groupStart.set(Date.now() / 1000);
-    await this.bus.publish('group:start', { date, startsAt: g.startsAt, sessionId: g.sessionId, lengthMin: g.lengthMin, mediaKey: `motd:${date}:${g.lengthMin}` });
+    await this.bus.publish('group:start', { date, startsAt: g.startsAt, sessionId: g.sessionId, lengthMin: g.lengthMin, mediaKey: `motd:${date.slice(0, 10)}:${g.lengthMin}` });
     const waiting = await this.redis.zcount(K.lobby(date), now - 90_000, '+inf');
-    await this.db.update(motdDays).set({ groupJoined: waiting, updatedAt: sql`now()` }).where(eq(motdDays.date, date));
+    if (date.length === 10) await this.db.update(motdDays).set({ groupJoined: waiting, updatedAt: sql`now()` }).where(eq(motdDays.date, date));
+    else await this.db.update(motdDays).set({ groupJoined: sql`${motdDays.groupJoined} + ${waiting}`, updatedAt: sql`now()` }).where(eq(motdDays.date, date.slice(0, 10)));
     return true;
   }
 }

@@ -4,13 +4,14 @@
  */
 export type Ack<T = unknown> = { ok: true; data: T } | { ok: false; code: string };
 
-export type LiveRoom = 'today' | 'world' | `motd:${string}` | `session:${string}` | `lobby:${string}`;
+export type LiveRoom = 'today' | 'world' | 'silence' | `motd:${string}` | `session:${string}` | `lobby:${string}`;
 
 export interface LiveAgg {
   total: number;              // unique users meditating now
   countries: number;
   top: { c: string; n: number }[]; // ISO-2, top 50
   todayTop?: { c: string; n: number }[]; // where people meditated today (ISO-2, top 50)
+  belts?: { americas: number; emea: number; apac: number }; // the same people grouped (Stitch)
   quiet: boolean;             // total < emptyRoomThreshold
   meditatedToday: number;
   vibration: number;          // 0–100
@@ -34,8 +35,9 @@ export interface LiveClientToServer {
 export interface LiveServerToClient {
   'live:agg': (p: LiveAgg) => void;
   'session:live': (p: { sessionId: string; people: number; countries: number }) => void;
+  'silence:live': (p: { people: number; belts: { americas: number; emea: number; apac: number }; quiet: boolean; at: number }) => void;
   'motd:stats': (p: { date: string; practicedToday: number }) => void;
-  'lobby:state': (p: { date: string; waiting: number; countries: number; regions: { r: string; n: number }[]; startsAt: string }) => void;
+  'lobby:state': (p: { date: string; waiting: number; countries: number; regions: { r: string; n: number }[]; byBelt?: { americas: number; emea: number; apac: number }; intentions?: Record<string, number>; startsAt: string }) => void;
   'group:start': (p: { date: string; startsAt: string; sessionId: string; lengthMin: number; mediaKey: string }) => void;
   'dedication:new': (p: { sessionId: string; items: unknown[] }) => void;
   'dedication:holding': (p: { id: string; holdingCount: number }) => void;

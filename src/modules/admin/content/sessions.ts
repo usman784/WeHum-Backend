@@ -27,6 +27,8 @@ const Fields = z.object({
   durationSec: z.number().int().min(1).max(4 * 3600), mediaId: uuidDto.nullable(), youtubeId: z.string().regex(/^[\w-]{11}$/, '11-character YouTube id').nullable(),
   coverMediaId: uuidDto.nullable(), coverUrl: url.nullable(), downloadable: z.boolean(),
   sosFeeling: z.string().trim().max(40).nullable(), sosSubtitle: z.string().trim().max(80).nullable(),
+  /** Chapters shown in the player ("Phase 2 · Anchoring breath"). */
+  phases: z.array(z.object({ atSec: z.number().int().min(0).max(4 * 3600), title: z.string().trim().min(1).max(60) }).strict()).max(12),
 });
 const CreateDto = Fields.partial().required({ title: true, type: true }).strict()
   .refine((b) => b.type !== 'youtube' || (b.access ?? 'free') === 'free', { message: 'YouTube items are always free', path: ['access'] });
@@ -120,6 +122,10 @@ export class SessionsAdminService {
     const [pre] = await this.db.select({ status: sessions.status, type: sessions.type }).from(sessions).where(eq(sessions.id, id));
     if (!pre) throw new AppError('NOT_FOUND', 'Meditation not found');
     const type = b.type ?? pre.type;
+    if (b.phases) {
+      const at = b.phases.map((p) => p.atSec);
+      if (at.some((v, i) => i > 0 && v <= at[i - 1]!)) throw new AppError('VALIDATION_FAILED', 'Phases must be in time order', { fields: [{ path: 'phases', message: 'Each phase starts after the one before' }] });
+    }
     if (type === 'youtube' && b.access === 'premium') throw new AppError('VALIDATION_FAILED', 'YouTube items are always free', { fields: [{ path: 'access', message: 'Must be free' }] });
     const media = b.mediaId ? await readyMedia(this.db, b.mediaId, [type === 'video' ? 'video' : 'audio']).catch((e) => { if (e instanceof AppError && e.code === 'MEDIA_NOT_READY') return null; throw e; }) : null;
     return this.writer.run(actor, { action: 'session.update', type: 'session', id, catalog: pre.status === 'live', invalidate: [] }, async (tx) => {

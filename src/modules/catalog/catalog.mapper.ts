@@ -24,7 +24,7 @@ export function toCover(cdn: CdnSigner, covers: Awaited<ReturnType<typeof coverM
  * Public session shape. Never exposes storage keys; `youtubeId` is only sent for free items
  * (premium items are played through POST /v1/media/play-url).
  */
-export function toSessionSummary(s: SessionRow, cdn: CdnSigner, covers: Awaited<ReturnType<typeof coverMap>>) {
+export function toSessionSummary(s: SessionRow, cdn: CdnSigner, covers: Awaited<ReturnType<typeof coverMap>>, sizes?: Map<string, number>) {
   return {
     id: s.id,
     slug: s.slug,
@@ -39,6 +39,11 @@ export function toSessionSummary(s: SessionRow, cdn: CdnSigner, covers: Awaited<
     cover: toCover(cdn, covers, s.coverMediaId, s.coverUrl),
     youtubeId: s.access === 'free' ? s.youtubeId : null,
     downloadable: s.access === 'premium' && s.downloadable && s.type !== 'youtube',
+    /** Chapters for the player: `[{ atSec, title }]`. */
+    phases: (s.phases ?? []) as { atSec: number; title: string }[],
+    sizeMb: s.mediaId && sizes?.has(s.mediaId) ? Math.max(1, Math.round((sizes.get(s.mediaId) ?? 0) / 1_048_576)) : null,
+    /** A free user may preview this for 30 s (audio, premium). */
+    previewable: s.access === 'premium' && s.type === 'audio',
     version: s.version,
   };
 }
