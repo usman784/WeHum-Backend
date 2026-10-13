@@ -167,12 +167,12 @@ describe('YouTube description', () => {
     try {
       await q(`INSERT INTO sessions (id, slug, title, type, access, duration_sec, youtube_id, status) VALUES (gen_random_uuid(), 'yt-one', 'Yt one', 'youtube', 'free', 600, 'bp-2_tAO3NY', 'live')`);
       const owner = await adminToken(app, await makeAdmin(db, 'owner'));
-      const before = (await q(`SELECT version FROM app_config WHERE key='catalog'`))[0]?.version ?? 0;
+      const before = Number((await q(`SELECT version FROM app_config WHERE key='catalog'`))[0]?.version ?? 0);
       const r = await h().post('/v1/admin/youtube/descriptions', {}, { token: owner });
       expect(r.body.data.filled).toBe(r.body.data.checked);
       expect(r.body.data.checked).toBeGreaterThanOrEqual(1); // the seeded YouTube items too
       expect((await q(`SELECT description FROM sessions WHERE slug='yt-one'`))[0]!.description).toBe('From the channel');
-      expect((await q(`SELECT version FROM app_config WHERE key='catalog'`))[0]!.version).toBeGreaterThan(before);
+      expect(Number((await q(`SELECT version FROM app_config WHERE key='catalog'`))[0]!.version)).toBeGreaterThan(before);
       expect((await h().post('/v1/admin/youtube/descriptions', {}, { token: owner })).body.data).toEqual({ checked: 0, filled: 0 }); // nothing missing any more
     } finally { YoutubeService.fetchImpl = real; }
   });
