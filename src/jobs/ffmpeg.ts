@@ -18,9 +18,16 @@ export async function probe(path: string): Promise<Probe> {
 
 /** Integrated loudness via `ffmpeg -af ebur128` (spec §8.5 `media_loudness`). Target −16 LUFS ±1. */
 export async function integratedLufs(path: string): Promise<number | null> {
-  const { stderr } = await run(env.FFMPEG_PATH, ['-hide_banner', '-nostats', '-i', path, '-vn', '-af', 'ebur128=framelog=quiet', '-f', 'null', '-'], { maxBuffer: BIG });
-  const m = /Integrated loudness:[\s\S]*?I:\s*(-?[\d.]+)\s*LUFS/.exec(stderr);
-  return m ? Math.round(Number(m[1]) * 100) / 100 : null;
+  // `framelog=verbose` keeps the per-frame lines out of the output at the default log level and exists in every ffmpeg since 4.x
+  // (the name `quiet` is only known to newer builds: on ffmpeg 5.1, the Debian 12 package, it made every upload fail).
+  // The level is advice for the editor: if the measurement itself cannot run, the file is still processed, without a number.
+  try {
+    const { stderr } = await run(env.FFMPEG_PATH, ['-hide_banner', '-nostats', '-i', path, '-vn', '-af', 'ebur128=framelog=verbose', '-f', 'null', '-'], { maxBuffer: BIG });
+    const m = /Integrated loudness:[\s\S]*?I:\s*(-?[\d.]+)\s*LUFS/.exec(stderr);
+    return m ? Math.round(Number(m[1]) * 100) / 100 : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Mean volume (dB) of a slice — used to check that a loop is seamless. */
