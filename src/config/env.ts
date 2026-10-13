@@ -29,6 +29,9 @@ const schema = z.object({
   FIREBASE_PROJECT_ID: z.string().default('wehum-a7fc5'),
   MAIL_FROM: z.string().default('WeHum <hello@wehum.app>'),
   SMTP_URL: z.string().default(''),
+  /** Newsletter list (Mailchimp): the key looks like `xxxxxxxx-us21`; the list and options are set in the CMS. */
+  MAILCHIMP_API_KEY: z.string().default(''),
+  MAILCHIMP_BASE_URL: z.string().default(''),
   APP_LINK_BASE: z.string().default('https://wehum.app'),
   FCM_SERVICE_ACCOUNT_JSON: z.string().default(''),
   REVENUECAT_WEBHOOK_SECRET: z.string().default(''),

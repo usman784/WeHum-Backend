@@ -123,6 +123,24 @@ export class AuthService {
     return row && !row.deleted ? row : null;
   }
 
+  /**
+   * One e-mail, one account: when an address already belongs to someone, say how that account signs in
+   * ("registered with Google"), so nobody ends up with two accounts for one address.
+   */
+  private async emailOwner(email: string, exceptUserId?: string) {
+    const [owner] = await this.db.select({ id: users.id }).from(users).where(and(eq(users.email, email), sql`${users.deletedAt} is null`, exceptUserId ? sql`${users.id} <> ${exceptUserId}` : undefined));
+    if (!owner) return null;
+    const ids = await this.db.select({ provider: authIdentities.provider }).from(authIdentities).where(and(eq(authIdentities.userId, owner.id), sql`${authIdentities.provider} <> 'device'`));
+    const names = [...new Set(ids.map((i) => (i.provider === 'email' ? 'email and password' : i.provider === 'google' ? 'Google' : 'Apple')))];
+    return { id: owner.id, methods: [...new Set(ids.map((i) => i.provider as string))], text: names.length ? names.join(' or ') : 'another method' };
+  }
+
+  private async assertEmailFree(email: string | null | undefined, as: string, exceptUserId?: string) {
+    if (!email) return;
+    const o = await this.emailOwner(email.toLowerCase(), exceptUserId);
+    if (o) throw new AppError('EMAIL_REGISTERED', `This email is already registered with ${o.text}. Log in with ${o.text}${o.methods.includes(as) ? '' : ' instead'}.`, { methods: o.methods });
+  }
+
   /** Turn the caller (guest) into an account by attaching an identity. */
   private async attach(tx: Tx, userId: string, provider: 'apple' | 'google' | 'email', providerUid: string, extra: { email?: string | null; emailVerified?: boolean; firstName?: string | null; lastName?: string | null; picture?: string | null; username?: string | null; passwordHash?: string }) {
     await tx.insert(authIdentities).values({ id: uuid(), userId, provider, providerUid, passwordHash: extra.passwordHash });
@@ -161,6 +179,7 @@ export class AuthService {
     const id = await this.social.verify(provider, body.idToken, { rawNonce: body.rawNonce, firstName: body.firstName });
     const existing = await this.findIdentity(provider, id.sub);
     let userId: string, mergeToken: string | null = null;
+    if (!existing) await this.assertEmailFree(id.email, provider, caller?.isGuest ? caller.id : undefined); // the same address under another sign-in method: say so
     if (existing) {
       userId = existing.userId;
       if (caller?.isGuest && caller.id !== userId) mergeToken = await this.mergeTokenFor(caller.id);
@@ -182,6 +201,7 @@ export class AuthService {
     const id = await this.social.verify(provider, body.idToken, { rawNonce: body.rawNonce, firstName: body.firstName });
     const existing = await this.findIdentity(provider, id.sub);
     if (existing && existing.userId !== user.id) throw new AppError('ACCOUNT_EXISTS', 'This account already exists. Log in to merge.', { mergeToken: await this.mergeTokenFor(user.id), provider });
+    if (!existing) await this.assertEmailFree(id.email, provider, user.id);
     if (!existing) await this.db.transaction((tx) => this.attach(tx, user.id, provider, id.sub, id));
     return this.reissue(user);
   }
@@ -190,6 +210,7 @@ export class AuthService {
     const email = body.email.toLowerCase();
     if (await this.findIdentity('email', email)) throw new AppError('ACCOUNT_EXISTS', 'This email already has an account. Log in to merge.', { mergeToken: await this.mergeTokenFor(user.id), provider: 'email' });
     const [taken] = await this.db.select({ id: users.id }).from(users).where(and(eq(users.email, email), sql`${users.id} <> ${user.id}`));
+    if (taken) await this.assertEmailFree(email, 'email', user.id); // registered with Google/Apple: "log in with Google", not a password merge
     if (taken) throw new AppError('ACCOUNT_EXISTS', 'This email already has an account. Log in to merge.', { mergeToken: await this.mergeTokenFor(user.id), provider: 'email' });
     const passwordHash = await argon2.hash(body.password, { type: argon2.argon2id });
     let username: string | null = null;
@@ -218,6 +239,7 @@ export class AuthService {
     if (Number(await this.redis.get(lockKey)) >= LOCK_LIMIT) throw new AppError('RATE_LIMITED', 'Too many attempts. Try again in 15 minutes.', undefined, { 'retry-after': String(LOCK_SEC) });
     const ident = await this.findIdentity('email', email);
     const ok = ident?.hash ? await argon2.verify(ident.hash, body.password) : (await argon2.hash('timing-equaliser'), false);
+    if (!ident) await this.assertEmailFree(email, 'email'); // an account that only signs in with Google/Apple: tell them how
     if (!ok || !ident) {
       const n = await this.redis.incr(lockKey);
       if (n === 1) await this.redis.expire(lockKey, LOCK_SEC);

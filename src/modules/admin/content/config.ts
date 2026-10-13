@@ -30,6 +30,7 @@ export const CONFIG_SCHEMAS = {
   }).strict(),
   branding: z.object({ appName: z.string().trim().min(1).max(30), tagline: z.string().trim().max(80), logoMediaId: z.string().uuid().nullable() }).strict(),
   push: z.object({ maxPerDay: z.number().int().min(1).max(10) }).strict(),
+  newsletter: z.object({ enabled: flag, listId: z.string().trim().max(40), doubleOptIn: flag, tags: z.array(z.string().trim().min(1).max(40)).max(10) }).strict(),
   today: z.object({
     emptyRoomThreshold: z.number().int().min(0).max(1000), freeHomePick: z.enum(['random', 'newest']), showDailyMessage: flag,
     sections: z.object({ progress: flag, liveCounter: flag, worldMap: flag }).strict(),
@@ -110,7 +111,7 @@ export class ConfigAdminService {
   }
 }
 
-const ConfigKeys = new Zod(z.enum(['main', 'legal', 'moderation', 'today', 'group', 'sos', 'silence', 'crisis', 'sitTimes', 'downloads', 'branding', 'push']));
+const ConfigKeys = new Zod(z.enum(['main', 'legal', 'moderation', 'today', 'group', 'sos', 'silence', 'crisis', 'sitTimes', 'downloads', 'branding', 'push', 'newsletter']));
 
 @ApiTags('Admin Settings')
 @ApiBearerAuth()

@@ -115,7 +115,7 @@ export class UsersAdminService {
     const st = stats[0] ?? { minutes_total: 0, meditations_total: 0, group_total: 0 };
     const saved = firstIdentity[0]?.created_at ? new Date(firstIdentity[0].created_at) : null;
     return {
-      id: u.id, name: u.first_name, lastName: u.last_name, username: u.username, avatarUrl: avatarOf(u.avatar_url), email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
+      id: u.id, name: u.first_name, lastName: u.last_name, bio: u.bio, username: u.username, avatarUrl: avatarOf(u.avatar_url), email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
       providers: [...new Set(ids.filter((i) => i.provider !== 'device').map((i) => i.provider))],
       streak: { current: streak.current, record: streak.record, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone }, heartRateReadings: hr,
       accountSavedAt: saved, wasGuestDays: saved ? Math.max(0, Math.round((saved.getTime() - new Date(u.created_at).getTime()) / 86_400_000)) : null,

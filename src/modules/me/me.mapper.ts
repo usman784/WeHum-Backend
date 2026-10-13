@@ -23,6 +23,7 @@ export function toMe(u: U, ids: I[], e: E, avatarUrl: string | null = null) {
     id: u.id,
     firstName: u.firstName,
     lastName: u.lastName,
+    bio: u.bio,
     username: u.username,
     usernameChangedAt: u.usernameChangedAt?.toISOString() ?? null,
     usernameNextChangeAt: u.usernameChangedAt ? new Date(u.usernameChangedAt.getTime() + 7 * 86_400_000).toISOString() : null,

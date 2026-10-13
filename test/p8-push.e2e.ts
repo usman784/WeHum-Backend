@@ -113,7 +113,7 @@ describe('P8 daily nudge', () => {
     await push().minute(now);
     for (const [i, p] of people.entries()) {
       expect(to(p), zones[i]).toHaveLength(1);
-      expect(to(p)[0]).toMatchObject({ title: 'WeHum', data: { type: 'daily_nudge', deepLink: 'wehum://today' } });
+      expect(to(p)[0]).toMatchObject({ title: 'WeHum', data: { type: 'daily_nudge', deepLink: 'wehum://motd' } });
       expect(to(p)[0]!.body).toContain(`P${i}`);
     }
     expect(to(late)).toHaveLength(0);
@@ -164,6 +164,10 @@ describe('P8 daily nudge', () => {
     expect(to(declined)[0]!.data.type).toBe('daily_nudge');
     await push().minute(now);
     expect(sent).toHaveLength(2); // still one each
+    // one push is one entry against the daily cap (so a second push the same day is still allowed), and it is in the in-app list with a link to the meditation
+    expect((await q(`SELECT count(*)::int AS n FROM push_log WHERE user_id=$1`, [wants.id]))[0]!.n).toBe(1);
+    expect(await q(`SELECT type, deep_link FROM inbox_items WHERE user_id=$1`, [wants.id])).toEqual([{ type: 'daily_message', deep_link: 'wehum://motd' }]);
+    expect(await q(`SELECT type, deep_link FROM inbox_items WHERE user_id=$1`, [declined.id])).toEqual([{ type: 'daily_nudge', deep_link: 'wehum://motd' }]);
     expect((await q(`SELECT count(*)::int AS n FROM auto_notifications WHERE delivered > 0`))[0]!.n).toBeGreaterThanOrEqual(2);
   });
 });

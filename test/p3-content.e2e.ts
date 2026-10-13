@@ -313,10 +313,11 @@ describe('P3 sessions', () => {
         calls.push(String(url));
         if (String(url).includes('private000')) return new Response('', { status: 401 });
         if (String(url).includes('down00000')) throw new Error('ECONNRESET');
+        if (String(url).includes('/watch?v=')) return new Response('.."shortDescription":"Ten calm minutes.\\nhttps://example.org/free",..', { status: 200 }); // the watch page: the description
         return new Response(JSON.stringify({ title: 'Ten Minutes of Calm', thumbnail_url: 'https://i.ytimg.com/vi/x/hq.jpg' }), { status: 200 });
       }) as typeof fetch;
       const ok = await A.post('/v1/admin/youtube/resolve', { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=9s' }, editor);
-      expect(ok.body.data).toMatchObject({ youtubeId: 'dQw4w9WgXcQ', title: 'Ten Minutes of Calm', durationSec: null });
+      expect(ok.body.data).toMatchObject({ youtubeId: 'dQw4w9WgXcQ', title: 'Ten Minutes of Calm', durationSec: null, description: 'Ten calm minutes.\nhttps://example.org/free' });
       for (const u of ['https://youtu.be/dQw4w9WgXcQ?si=abc', 'youtube.com/shorts/dQw4w9WgXcQ', 'https://m.youtube.com/embed/dQw4w9WgXcQ', 'dQw4w9WgXcQ']) {
         expect((await A.post('/v1/admin/youtube/resolve', { url: u })).body.data.youtubeId, u).toBe('dQw4w9WgXcQ');
       }
@@ -328,7 +329,7 @@ describe('P3 sessions', () => {
       const down = await A.post('/v1/admin/youtube/resolve', { url: 'down00000aa' });
       expect(down.status).toBe(503);
       expect(down.body.error.code).toBe('DEPENDENCY_DOWN');
-      expect(calls.every((c) => c.startsWith('https://www.youtube.com/oembed'))).toBe(true);
+      expect(calls.every((c) => c.startsWith('https://www.youtube.com/oembed') || c.startsWith('https://www.youtube.com/watch?v='))).toBe(true); // the link check and the description, nothing else
     } finally { YoutubeService.fetchImpl = real; }
     const { isoDurationSec } = await import('../src/modules/admin/content/youtube');
     expect(isoDurationSec('PT1H2M3S')).toBe(3723);
@@ -570,7 +571,7 @@ describe('P3 Today screen: MOTD + group + config', () => {
 
   it('settings: all groups readable by owner/admin, validated per key', async () => {
     const all = await A.get('/v1/admin/config', adminTok);
-    expect(Object.keys(all.body.data).sort()).toEqual(['branding', 'breathwork', 'crisis', 'downloads', 'group', 'legal', 'main', 'moderation', 'push', 'silence', 'sitTimes', 'sos', 'today']);
+    expect(Object.keys(all.body.data).sort()).toEqual(['branding', 'breathwork', 'crisis', 'downloads', 'group', 'legal', 'main', 'moderation', 'newsletter', 'push', 'silence', 'sitTimes', 'sos', 'today']);
     expect((await A.get('/v1/admin/config', editor)).status).toBe(403);
     const main = all.body.data.main.value;
     expect((await A.put('/v1/admin/config/main', { ...main, minVersion: { ios: '2', android: '1.0.0' } }, adminTok)).status).toBe(400);

@@ -1537,3 +1537,12 @@ Status: ✅ done
 `DELETE /v1/me/inbox/:id` (204; 404 when it is not the caller's) and `DELETE /v1/me/inbox` (`{removed}`) for the app's swipe-to-delete. Test: `p13-profile.e2e.ts` (inbox delete). The demo environment now has playable audio for every seeded session (a generated tone in the local bucket), phases on the audio sessions, daily messages with transcripts for ±a week and a cover image.
 
 Status: ✅ done
+
+### Phase P15 — Client tickets (Oct 13)
+Migrations `0009_profile_bio` (`users.bio`, 200 characters) and `0010_newsletter` (`users.newsletter_synced_at`, `newsletter_error`).
+- **Bio:** `PATCH /v1/me { bio }` (≤ 200, empty clears), returned by `GET /v1/me` and shown in the CMS user detail. Usernames stay unique (`users_username_unique`, case-insensitive).
+- **One e-mail, one account:** new error `EMAIL_REGISTERED` (409, `details.methods`). Google/Apple sign-in, e-mail sign-up and e-mail login for an address that belongs to an account with another method say how that account signs in ("registered with Google. Log in with Google").
+- **Newsletter (Mailchimp), from the server only:** env `MAILCHIMP_API_KEY` (`xxxx-us21`), config key `newsletter {enabled, listId, doubleOptIn, tags}`. Cron `newsletter.sync` (every minute) adds each verified, non-guest address once (`PUT /3.0/lists/{id}/members/{md5}`, first/last name, tags, `pending` when double opt-in), also back-fills earlier sign-ups; a refused address is marked and not retried, an outage retries next minute. CMS: `GET /v1/admin/newsletter/status`, `POST /v1/admin/newsletter/sync`.
+- **YouTube description:** `POST /v1/admin/youtube/resolve` also returns `description` (Data API with a key, otherwise the public watch page; ≤ 4,000 characters); `POST /v1/admin/youtube/descriptions {all?}` fills the items that have none and bumps the catalog. The catalog already carries `description`.
+- **Notifications:** the merged "message + reminder" push counts once against `push.maxPerDay` (it used to count twice, so one push used the whole cap of 2); daily nudge, daily message and group warning pushes are also written to the in-app inbox; reminder and untimed message link to `wehum://motd`, a timed daily message to `wehum://message/{date}`.
+Tests: `test/p14-tickets.e2e.ts` (bio, e-mail conflicts, newsletter, YouTube description) and the extended `p8-push.e2e.ts`.

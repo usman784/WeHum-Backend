@@ -45,7 +45,7 @@ export class PushService {
 
   // ───────────── delivery
   /** Push to all devices of these users; invalid tokens are removed. Returns how many users got it and how many sends failed. */
-  async deliver(userIds: string[], msg: { title: string; body: string; type: string; deepLink?: string | null; notificationId?: string }) {
+  async deliver(userIds: string[], msg: { title: string; body: string; type: string; deepLink?: string | null; notificationId?: string; inbox?: boolean }) {
     if (!userIds.length) return { delivered: [] as string[], failed: 0 };
     const devs = await this.db.select({ userId: devices.userId, token: devices.pushToken }).from(devices).where(and(inArray(devices.userId, userIds), sql`${devices.pushToken} is not null`));
     const data: Record<string, string> = { type: msg.type, deepLink: msg.deepLink ?? '', ...(msg.notificationId && { notificationId: msg.notificationId }) };
@@ -58,6 +58,8 @@ export class PushService {
     for (const d of devs) { if (status.get(d.token!) === 'ok') ok.add(d.userId); else failed++; }
     metrics.pushSent.inc({ key: msg.type, status: 'delivered' }, ok.size);
     if (failed) metrics.pushSent.inc({ key: msg.type, status: 'failed' }, failed);
+    // what reached a phone is also in the in-app list, so the list shows every notification the person got
+    if (msg.inbox && ok.size) await this.inbox([...ok], { type: msg.type, title: msg.title, body: msg.body, deepLink: msg.deepLink });
     return { delivered: [...ok], failed };
   }
 
@@ -76,6 +78,12 @@ export class PushService {
     if (!allowed.length) return new Set();
     const got = await this.db.insert(pushLog).values(allowed.map((r) => ({ userId: r.userId, key, localDate: r.date }))).onConflictDoNothing().returning({ userId: pushLog.userId });
     return new Set(got.map((g) => g.userId));
+  }
+
+  private async sentToday(userIds: string[], date: string, key: string): Promise<Set<string>> {
+    if (!userIds.length) return new Set();
+    const r = await this.db.select({ userId: pushLog.userId }).from(pushLog).where(and(eq(pushLog.localDate, date), eq(pushLog.key, key), inArray(pushLog.userId, userIds)));
+    return new Set(r.map((x) => x.userId));
   }
 
   async inbox(userIds: string[], item: { type: string; title: string; body: string; deepLink?: string | null }) {
@@ -108,19 +116,21 @@ export class PushService {
         const withMessage = todays && !todays.pushTime && message?.enabled ? due.filter((u) => u.messagePush) : [];
         const mset = await this.claim(withMessage.map((u) => ({ userId: u.id, date })), 'daily_message');
         if (mset.size) {
-          await this.claim([...mset].map((userId) => ({ userId, date })), 'daily_nudge'); // the nudge is used up too
-          const r = await this.deliver([...mset], { title: message!.title, body: fill(message!.body, { title: todays!.title }), type: 'daily_message', deepLink: 'wehum://today' });
+          const r = await this.deliver([...mset], { title: message!.title, body: fill(message!.body, { title: todays!.title }), type: 'daily_message', deepLink: 'wehum://motd', inbox: true });
           await this.count('daily_message', r.delivered.length);
           out.nudges += r.delivered.length;
         }
         if (nudge?.enabled) {
-          const rest = due.filter((u) => !mset.has(u.id));
+          // A message that is already today's push (it has no push time of its own) is also the reminder: no second one later in the day.
+          // It is one push, so it counts once against the daily cap.
+          const had = todays && !todays.pushTime ? await this.sentToday(due.map((u) => u.id), date, 'daily_message') : new Set<string>();
+          const rest = due.filter((u) => !mset.has(u.id) && !had.has(u.id));
           const nset = await this.claim(rest.map((u) => ({ userId: u.id, date })), 'daily_nudge');
           const named = rest.filter((u) => nset.has(u.id)); // the copy has the first name, so one call per distinct text
           const byCopy = new Map<string, string[]>();
           for (const u of named) { const body = fill(nudge.body, { firstName: u.firstName?.trim() || 'friend' }); byCopy.set(body, [...(byCopy.get(body) ?? []), u.id]); }
           for (const [body, ids] of byCopy) {
-            const r = await this.deliver(ids, { title: nudge.title, body, type: 'daily_nudge', deepLink: 'wehum://today' });
+            const r = await this.deliver(ids, { title: nudge.title, body, type: 'daily_nudge', deepLink: 'wehum://motd', inbox: true });
             await this.count('daily_nudge', r.delivered.length);
             out.nudges += r.delivered.length;
           }
@@ -146,7 +156,7 @@ export class PushService {
       const due = await this.db.select({ id: users.id }).from(users).where(and(eq(users.timezone, tz), eq(users.dailyMessagePush, true), sql`${users.deletedAt} is null`, sql`exists (select 1 from devices d where d.user_id = users.id and d.push_token is not null)`));
       const got = await this.claim(due.map((u) => ({ userId: u.id, date })), 'daily_message');
       if (!got.size) continue;
-      const r = await this.deliver([...got], { title: message.title, body: fill(message.body, { title: m.title }), type: 'daily_message', deepLink: 'wehum://today' });
+      const r = await this.deliver([...got], { title: message.title, body: fill(message.body, { title: m.title }), type: 'daily_message', deepLink: `wehum://message/${date}`, inbox: true });
       await this.count('daily_message', r.delivered.length);
       sent += r.delivered.length;
     }
@@ -170,7 +180,7 @@ export class PushService {
       const opted = slot.length === 10 ? await this.db.select({ id: users.id }).from(users).where(and(eq(users.groupWarning, true), sql`${users.deletedAt} is null`)) : [];
       const ids = [...new Set([...reminded, ...opted.map((o) => o.id)])];
       const time = new Date(g.startsAt).toISOString().slice(11, 16);
-      const r = await this.deliver(ids, { title: auto.title, body: fill(auto.body, { title: g.title ?? 'The Meditation of the Day', time: `${time} UTC`, waiting: g.waiting }), type: 'group_warning', deepLink: 'wehum://group' });
+      const r = await this.deliver(ids, { title: auto.title, body: fill(auto.body, { title: g.title ?? 'The Meditation of the Day', time: `${time} UTC`, waiting: g.waiting }), type: 'group_warning', deepLink: 'wehum://group', inbox: true });
       await this.count('group_warning', r.delivered.length);
       total += r.delivered.length;
     }

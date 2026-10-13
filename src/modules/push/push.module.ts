@@ -5,14 +5,15 @@ import { AdminWriter } from '../admin/admin-writer';
 import { Mailer } from '../../infra/mailer';
 import { GroupService } from '../today/group.service';
 import { NotificationsAdminController, NotificationsAdminService } from './notifications.admin';
+import { NewsletterAdminController, NewsletterService } from '../newsletter/newsletter.service';
 import { PushController } from './push.controller';
 import { PushService } from './push.service';
 
 /** P8: devices and push tokens, inbox, the minute scheduler (nudge, group warning), trial ending, announcements and their CMS API. */
 @Module({
   imports: [AuthModule, ContentModule],
-  controllers: [PushController, NotificationsAdminController],
-  providers: [PushService, GroupService, AdminWriter, NotificationsAdminService, Mailer],
-  exports: [PushService],
+  controllers: [PushController, NotificationsAdminController, NewsletterAdminController],
+  providers: [PushService, GroupService, AdminWriter, NotificationsAdminService, Mailer, NewsletterService],
+  exports: [PushService, NewsletterService],
 })
 export class PushModule {}

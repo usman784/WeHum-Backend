@@ -45,6 +45,10 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey(),
   firstName: varchar('first_name', { length: 30 }),
   lastName: varchar('last_name', { length: 30 }),
+  bio: varchar('bio', { length: 200 }),
+  /** When this address was added to the newsletter list (null = not yet); `newsletterError` is set when the list refused it for good. */
+  newsletterSyncedAt: ts('newsletter_synced_at'),
+  newsletterError: varchar('newsletter_error', { length: 120 }),
   /** Public handle (3–20 of a-z 0-9 . _), unique ignoring case; changeable once per 7 days. */
   username: citext('username').unique(),
   usernameChangedAt: ts('username_changed_at'),

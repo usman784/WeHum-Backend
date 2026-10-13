@@ -11,6 +11,7 @@ import { UserDataService } from '../modules/users-admin/user-data.service';
 import { PushService } from '../modules/push/push.service';
 import { RcProcessor } from '../modules/subscriptions/rc.processor';
 import { MediaProcessor } from './media.processor';
+import { NewsletterService } from '../modules/newsletter/newsletter.service';
 import { PublishDueService } from './publish-due.service';
 import { metrics } from '../infra/metrics';
 import { bullConnection, QUEUES, QueueService } from './queues';
@@ -40,6 +41,7 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
         if (job.name === 'user.export') return this.moduleRef.get(UserDataService, { strict: false }).exportUser(job.data.jobId, job.data.userId, job.data.emailTo ?? null);
         if (job.name === 'user.delete') return this.moduleRef.get(UserDataService, { strict: false }).deleteUser(job.data.jobId, job.data.userId, job.data.adminId ?? null);
         if (job.name === 'push.minute') return this.moduleRef.get(PushService, { strict: false }).minute();
+        if (job.name === 'newsletter.sync') return this.moduleRef.get(NewsletterService, { strict: false }).syncPending();
         if (job.name === 'push.trial') return this.moduleRef.get(PushService, { strict: false }).trialEnding();
         if (job.name === 'rc.process') return this.rc.process(job.data.eventId);
         if (job.name === 'rc.reconcile') return this.rc.reconcile();

@@ -9,6 +9,7 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   },
   branding: { appName: 'WeHum', tagline: 'Meditate together', logoMediaId: null },
   push: { maxPerDay: 2 },
+  newsletter: { enabled: false, listId: '', doubleOptIn: true, tags: ['wehum-app'] },
   today: { emptyRoomThreshold: 10, freeHomePick: 'random', showDailyMessage: false, sections: { progress: true, liveCounter: true, worldMap: true } },
   group: {
     startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 15, reminderMin: 10,

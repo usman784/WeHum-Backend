@@ -64,6 +64,20 @@
       "when": 1791801000000,
       "tag": "0008_profile_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791887400000,
+      "tag": "0009_profile_bio",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791973800000,
+      "tag": "0010_newsletter",
+      "breakpoints": true
     }
   ]
 }

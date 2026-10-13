@@ -18,6 +18,8 @@ const PatchMe = z.object({
   firstName: name.optional(),
   lastName: name.nullable().optional(),
   username: z.string().trim().min(3).max(20).optional(),
+  /** Short bio, 200 characters at most; an empty text clears it. */
+  bio: z.string().trim().max(200).nullable().optional(),
   timezone: tz.optional(),
   locale: z.string().max(10).optional(),
   country: z.string().regex(/^[A-Z]{2}$/).optional(),
@@ -48,8 +50,9 @@ export class MeController {
    */
   @Patch()
   async update(@CurrentUser() u: AppUser, @Body(new Zod(PatchMe)) b: z.infer<typeof PatchMe>) {
-    const { username, ...rest } = b;
+    const { username, bio, ...rest } = b;
     const patch: Partial<typeof users.$inferInsert> = { ...rest };
+    if (bio !== undefined) patch.bio = bio ? bio : null;
     if (username !== undefined) {
       const [cur] = await this.db.select({ username: users.username, usernameChangedAt: users.usernameChangedAt }).from(users).where(eq(users.id, u.id));
       const next = await this.usernames.assertChange(u.id, cur ?? { username: null, usernameChangedAt: null }, username);
