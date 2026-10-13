@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import argon2 from 'argon2';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
@@ -195,7 +195,8 @@ export class AuthService {
     let username: string | null = null;
     if (body.username) { const v = validateUsername(body.username); if (!v.ok) throw new AppError('VALIDATION_FAILED', v.reason); if (!(await this.usernames.isAvailable(v.value, user.id))) throw new AppError('ALREADY_EXISTS', 'That username is taken', { suggestions: await this.usernames.suggest(v.value, 3) }); username = v.value; }
     await this.db.transaction((tx) => this.attach(tx, user.id, 'email', email, { email, firstName: body.firstName, lastName: body.lastName, username, passwordHash }));
-    await this.sendEmailToken('verify', email, user.id);
+    // a mail outage must not undo a sign-up that already succeeded: the person can ask for the link again
+    await this.sendEmailToken('verify', email, user.id).catch((e) => new Logger('AuthService').warn(`verify mail not sent: ${(e as Error).message}`));
     return this.reissue(user);
   }
 

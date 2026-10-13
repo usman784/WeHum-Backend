@@ -71,6 +71,20 @@ export class PushController {
     return { read: r.length };
   }
 
+  /** Swipe-to-delete in the app: removes one notification of this person (nothing else is touched). */
+  @HttpCode(204) @Delete('me/inbox/:id')
+  async removeInbox(@CurrentUser() u: AppUser, @Param('id', Id) id: string) {
+    const r = await this.db.delete(inboxItems).where(and(eq(inboxItems.id, id), eq(inboxItems.userId, u.id))).returning({ id: inboxItems.id });
+    if (!r.length) throw new AppError('NOT_FOUND', 'Notification not found');
+  }
+
+  /** "Clear all": every notification of this person. */
+  @HttpCode(200) @Delete('me/inbox')
+  async clearInbox(@CurrentUser() u: AppUser) {
+    const r = await this.db.delete(inboxItems).where(eq(inboxItems.userId, u.id)).returning({ id: inboxItems.id });
+    return { removed: r.length };
+  }
+
   /** "Remind me" on the lobby: this person gets the group warning for the next start. */
   @HttpCode(200) @Put('group/remind')
   async remind(@CurrentUser() u: AppUser) {

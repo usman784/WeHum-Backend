@@ -145,3 +145,18 @@ describe('push cap and tracking', () => {
     expect((await q<{ status: string }>(`SELECT status FROM daily_messages WHERE date = $1`, [day]))[0]!.status).toBe('live');
   });
 });
+
+describe('inbox delete', () => {
+  it('a person deletes one notification (only their own) or clears them all', async () => {
+    const a = await guest(app), b = await guest(app);
+    const { v7: uuid } = await import('uuid');
+    const ids = [uuid(), uuid()], other = uuid();
+    for (const id of ids) await q(`INSERT INTO inbox_items (id, user_id, type, title, body) VALUES ($1,$2,'daily','t','b')`, [id, a.me.id]);
+    await q(`INSERT INTO inbox_items (id, user_id, type, title, body) VALUES ($1,$2,'daily','t','b')`, [other, b.me.id]);
+    expect((await h().request('DELETE', `/v1/me/inbox/${ids[0]}`, { token: a.accessToken })).status).toBe(204);
+    expect((await h().request('DELETE', `/v1/me/inbox/${other}`, { token: a.accessToken })).status).toBe(404); // not theirs
+    expect((await h().get('/v1/me/inbox', { token: a.accessToken })).body.data).toHaveLength(1);
+    expect((await h().request('DELETE', '/v1/me/inbox', { token: a.accessToken })).body.data.removed).toBe(1);
+    expect((await h().get('/v1/me/inbox', { token: b.accessToken })).body.data).toHaveLength(1);
+  });
+});
