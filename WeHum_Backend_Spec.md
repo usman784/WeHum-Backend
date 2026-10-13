@@ -1532,3 +1532,8 @@ Decisions / deviations:
 - The launcher icon cannot change after a store release: Branding changes the name and logo shown *inside* the app and the CMS.
 
 Status: ✅ done
+
+### Phase P14 — Inbox delete (Oct 13)
+`DELETE /v1/me/inbox/:id` (204; 404 when it is not the caller's) and `DELETE /v1/me/inbox` (`{removed}`) for the app's swipe-to-delete. Test: `p13-profile.e2e.ts` (inbox delete). The demo environment now has playable audio for every seeded session (a generated tone in the local bucket), phases on the audio sessions, daily messages with transcripts for ±a week and a cover image.
+
+Status: ✅ done
