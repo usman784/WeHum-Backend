@@ -100,15 +100,25 @@ export class YoutubeService {
     if (!o.ok) throw new AppError('DEPENDENCY_DOWN', 'YouTube could not be reached. Try again.');
     const meta = (await o.json()) as { title?: string; thumbnail_url?: string };
     let durationSec: number | null = null;
+    // Non-blocking notes for the CMS: 'short' / 'unlisted' get fewer ads from YouTube ("no ads in the app" is expected, not a bug);
+    // 'unverified' = no Data API answer, so embeddable / "made for kids" were not checked (set YOUTUBE_API_KEY).
+    const warnings: string[] = [];
+    let verified = false; // the Data API answered: embeddable, private, "made for kids" were really checked
+    if (/\/shorts\//.test(input)) warnings.push('short');
     if (env.YOUTUBE_API_KEY) {
       const r = await this.get(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails,status&id=${id}&key=${env.YOUTUBE_API_KEY}`);
       if (r.ok) {
-        const item = ((await r.json()) as { items?: { contentDetails?: { duration?: string }; status?: { embeddable?: boolean; privacyStatus?: string } }[] }).items?.[0];
+        const item = ((await r.json()) as { items?: { contentDetails?: { duration?: string }; status?: { embeddable?: boolean; privacyStatus?: string; madeForKids?: boolean } }[] }).items?.[0];
         if (!item || item.status?.privacyStatus === 'private' || item.status?.embeddable === false) throw unavailable();
+        // "made for kids" videos get no personalised ads and limited ad serving: refuse them for the free library
+        if (item.status?.madeForKids === true) throw new AppError('YOUTUBE_UNAVAILABLE', 'This video is marked “made for kids” on YouTube, which limits ads. Pick another video.');
+        if (item.status?.privacyStatus === 'unlisted') warnings.push('unlisted');
         durationSec = item.contentDetails?.duration ? isoDurationSec(item.contentDetails.duration) : null;
+        verified = true;
       }
     }
-    return { youtubeId: id, description: await this.describe(id), title: meta.title ?? null, thumbnailUrl: meta.thumbnail_url ?? `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, durationSec };
+    if (!verified) warnings.push('unverified');
+    return { youtubeId: id, description: await this.describe(id), title: meta.title ?? null, thumbnailUrl: meta.thumbnail_url ?? `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, durationSec, warnings };
   }
 }
 

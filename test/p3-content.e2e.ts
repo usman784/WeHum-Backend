@@ -2,6 +2,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Client } from 'pg';
 import { v7 as uuid } from 'uuid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { env } from '../src/config/env';
 import { PublishDueService } from '../src/jobs/publish-due.service';
 import { YoutubeService } from '../src/modules/admin/content/youtube';
 import { adminToken, bootApp, guest, http, makeAdmin, resetTestDb } from './helpers';
@@ -330,7 +331,35 @@ describe('P3 sessions', () => {
       expect(down.status).toBe(503);
       expect(down.body.error.code).toBe('DEPENDENCY_DOWN');
       expect(calls.every((c) => c.startsWith('https://www.youtube.com/oembed') || c.startsWith('https://www.youtube.com/watch?v='))).toBe(true); // the link check and the description, nothing else
+      expect((await A.post('/v1/admin/youtube/resolve', { url: 'youtube.com/shorts/dQw4w9WgXcQ' })).body.data.warnings).toEqual(['short', 'unverified']);
+      expect(ok.body.data.warnings).toEqual(['unverified']); // no API key: embeddable / made-for-kids not checked
     } finally { YoutubeService.fetchImpl = real; }
+    // with a Data API key: "made for kids" is refused (limited ads), unlisted is allowed with a note
+    const realKey = env.YOUTUBE_API_KEY;
+    env.YOUTUBE_API_KEY = 'test-key';
+    try {
+      const status = { value: {} as Record<string, unknown>, apiDown: false };
+      YoutubeService.fetchImpl = (async (url: string) => {
+        if (String(url).includes('googleapis.com') && status.apiDown) return new Response('', { status: 500 });
+        if (String(url).includes('googleapis.com')) return new Response(JSON.stringify({ items: [{ contentDetails: { duration: 'PT10M' }, status: { embeddable: true, privacyStatus: 'public', ...status.value } }] }), { status: 200 });
+        if (String(url).includes('/watch?v=')) return new Response('nothing', { status: 200 });
+        return new Response(JSON.stringify({ title: 'T', thumbnail_url: 'https://i.ytimg.com/vi/x/hq.jpg' }), { status: 200 });
+      }) as typeof fetch;
+      const pub = await A.post('/v1/admin/youtube/resolve', { url: 'dQw4w9WgXcQ' }, editor);
+      expect(pub.body.data).toMatchObject({ durationSec: 600, warnings: [] });
+      status.value = { madeForKids: true };
+      const kids = await A.post('/v1/admin/youtube/resolve', { url: 'dQw4w9WgXcQ' });
+      expect(kids.status).toBe(422);
+      expect(kids.body.error.code).toBe('YOUTUBE_UNAVAILABLE');
+      status.value = { privacyStatus: 'unlisted' };
+      expect((await A.post('/v1/admin/youtube/resolve', { url: 'dQw4w9WgXcQ' })).body.data.warnings).toEqual(['unlisted']);
+      status.value = {};
+      expect((await A.post('/v1/admin/youtube/resolve', { url: 'youtube.com/shorts/dQw4w9WgXcQ' })).body.data.warnings).toEqual(['short']);
+      status.apiDown = true; // the Data API fails: resolve still works, but says the checks did not run
+      const down = await A.post('/v1/admin/youtube/resolve', { url: 'dQw4w9WgXcQ' });
+      expect(down.status).toBe(200);
+      expect(down.body.data).toMatchObject({ durationSec: null, warnings: ['unverified'] });
+    } finally { YoutubeService.fetchImpl = real; env.YOUTUBE_API_KEY = realKey; }
     const { isoDurationSec } = await import('../src/modules/admin/content/youtube');
     expect(isoDurationSec('PT1H2M3S')).toBe(3723);
     expect(isoDurationSec('PT45S')).toBe(45);

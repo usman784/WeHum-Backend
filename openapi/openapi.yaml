@@ -949,7 +949,7 @@ paths:
       operationId: post_v1_admin_youtube_resolve
       tags: ["Sessions"]
       summary: "Resolve YouTube URL \u2192 title, duration, thumbnail"
-      description: "Auth: admin:owner,admin,editor. private/removed \u2192 422 YOUTUBE_UNAVAILABLE"
+      description: "Auth: admin:owner,admin,editor. private/removed/not embeddable, or (with YOUTUBE_API_KEY) made for kids \u2192 422 YOUTUBE_UNAVAILABLE. Response data adds warnings: (short | unlisted | unverified)[] (non-blocking; fewer ads on short/unlisted, unverified = Data API checks did not run)"
       requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
       responses:
         '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
