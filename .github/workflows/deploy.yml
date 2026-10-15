@@ -1,0 +1,58 @@
+name: Deploy demo server
+
+# Runs after CI is green on main, or by hand (Actions → Deploy demo server → Run workflow).
+# Copies the backend source and the deploy files to /opt/wehum on the demo VPS and runs deploy/demo/remote.sh there
+# (build, migrate, restart). `.env` and the data volumes stay on the server. Secrets: SSH_HOST, SSH_USER, SSH_KEY.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+env:
+  CMS_HOST: cms.wehum.app
+  API_HOST: api.wehum.app
+  COOKIE_DOMAIN: .wehum.app
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: SSH key and host
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+      - name: Copy source and deploy files
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes"
+          T="${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+          $SSH "$T" "mkdir -p /opt/wehum/backend"
+          rsync -az --delete -e "$SSH" --exclude node_modules --exclude dist --exclude .env --exclude test-results --exclude .git --exclude .github ./ "$T:/opt/wehum/backend/"
+          rsync -az -e "$SSH" deploy/demo/docker-compose.yml deploy/demo/env.template deploy/demo/remote.sh deploy/demo/nginx deploy/demo/img "$T:/opt/wehum/"
+      - name: Build, migrate and restart on the server
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes"
+          T="${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+          # remote.sh prints the owner password on its last line: mask it so it never reaches the log
+          $SSH "$T" "CMS_HOST='$CMS_HOST' API_HOST='$API_HOST' COOKIE_DOMAIN='$COOKIE_DOMAIN' bash /opt/wehum/remote.sh" 2>&1 | sed -E 's#(owner: [^ ]+ / ).*#\1***#'
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://$API_HOST/readyz" || true)
+            echo "readyz: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          exit 1
