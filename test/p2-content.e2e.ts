@@ -289,6 +289,18 @@ describe('P2 play-url (signed, premium-gated)', () => {
     expect((await play(member.accessToken, { kind: 'motd', date: dayIso(), lengthMin: 20 })).status).toBe(400);
   });
 
+  it('MOTD with no audio for the requested date plays the most recent earlier one of that length, so a shown meditation always starts', async () => {
+    const [latest] = (await db.query(`SELECT date::text AS date FROM motd_variants WHERE length_min = 30 ORDER BY date DESC LIMIT 1`)).rows as { date: string }[];
+    const ahead = new Date(Date.parse(`${latest!.date}T00:00:00Z`) + 5 * 86_400_000).toISOString().slice(0, 10);
+    const r = await play(member.accessToken, { kind: 'motd', date: ahead, lengthMin: 30 });
+    expect(r.status).toBe(200);
+    expect(r.body.data.durationSec).toBe(1800);
+    // nothing earlier than the first scheduled day: still not found
+    expect((await play(member.accessToken, { kind: 'motd', date: '2020-01-01', lengthMin: 30 })).status).toBe(404);
+    // a free user still gets the paywall, not the audio
+    expect((await play(free.accessToken, { kind: 'motd', date: ahead, lengthMin: 30 })).body.error.code).toBe('PREMIUM_REQUIRED');
+  });
+
   it('sound block + daily message audio', async () => {
     const b = (await q<{ id: string }>(`SELECT id FROM sound_blocks ORDER BY "order" LIMIT 1`))[0]!.id;
     expect((await play(free.accessToken, { kind: 'block', id: b })).status).toBe(403);

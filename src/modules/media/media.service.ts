@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, lte } from 'drizzle-orm';
 import { z } from 'zod';
 import type Redis from 'ioredis';
 import { AppError } from '../../common/errors';
@@ -54,7 +54,10 @@ export class MediaService {
       }
       case 'motd': {
         await this.requirePremium(userId);
-        const [v] = await this.db.select({ mediaId: motdVariants.mediaId }).from(motdVariants).where(and(eq(motdVariants.date, req.date), eq(motdVariants.lengthMin, req.lengthMin)));
+        // Today's audio is not scheduled yet: play the most recent earlier one of this length. Today screen then shows a meditation
+        // that starts, instead of "Not available" on a button that was offered.
+        const [v] = await this.db.select({ mediaId: motdVariants.mediaId }).from(motdVariants)
+          .where(and(lte(motdVariants.date, req.date), eq(motdVariants.lengthMin, req.lengthMin))).orderBy(desc(motdVariants.date)).limit(1);
         if (!v) throw new AppError('NOT_FOUND', 'No meditation of the day for this date and length');
         return this.sign(v.mediaId, 'audio', download, req.lengthMin * 60);
       }
