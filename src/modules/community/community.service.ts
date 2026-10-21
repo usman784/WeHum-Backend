@@ -92,10 +92,9 @@ export class CommunityService {
       throw e;
     }
     if (status === 'visible') await this.bus.publish('dedication:new', { sessionId: row.sessionId, items: [toView(row)] });
-    if (status === 'flagged') {
-      await this.bus.publish('moderation:new', { dedication: await this.adminView(row.id), flags });
-      await this.announceCount();
-    }
+    // every new post reaches the CMS at once ("All posts", today's numbers); only a flagged one changes the open count
+    await this.bus.publish('moderation:new', { dedication: await this.adminView(row.id), flags });
+    if (status === 'flagged') await this.announceCount();
     // a flagged or hidden post is accepted: the writer is not told why (except crisis: the app shows the help card)
     return { id: row.id, status: status === 'visible' ? 'visible' : 'pending', showHelp: crisis.length > 0, dedicationsLeftToday: Math.max(0, rules.dailyLimit - used) };
   }

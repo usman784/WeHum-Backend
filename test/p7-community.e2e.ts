@@ -134,6 +134,7 @@ describe('P7 posting', () => {
     expect(row).toMatchObject({ session_id: sid, first_name: 'Mia', country: 'FR' });
     await settle();
     expect(bus.some((e) => e.topic === 'dedication:new' && e.payload.sessionId === sid && e.payload.items[0].id === r.body.data.id)).toBe(true);
+    expect(bus.some((e) => e.topic === 'moderation:new' && e.payload.dedication.id === r.body.data.id)).toBe(true); // the CMS list updates live too
     expect((await bySession(w, 'a second one')).status).toBe(201); // not one per meditation: several from the same session
     expect((await post(w, await meditate(w.id), 'after the sit')).status).toBe(201); // shares the daily limit with the complete screen
     expect((await bySession(w, 'one too many')).body.error.code).toBe('DEDICATION_LIMIT');
