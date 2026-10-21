@@ -33,9 +33,9 @@ export class TodayController {
 
   /** The next group sit with its cadence, intentions, "today's focus" and how many people wait in each belt. */
   @Get('group/next')
-  async next(@CurrentUser() u: AppUser, @Res({ passthrough: true }) res: FastifyReply) {
+  async next(@CurrentUser() u: AppUser, @Query(new Zod(z.object({ kind: z.enum(['group', 'global']).default('group') }))) q: { kind: 'group' | 'global' }, @Res({ passthrough: true }) res: FastifyReply) {
     res.header('cache-control', PRIVATE);
-    return this.today.nextGroup(u);
+    return this.today.nextGroup(u, q.kind);
   }
 
   /** Saves the person's intention for a sit (one of the configured options). */

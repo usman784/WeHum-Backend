@@ -15,7 +15,7 @@ import { ConfigService, type MainConfig } from '../modules/config/config.service
 import { EntitlementService } from '../modules/entitlements/entitlement.service';
 import { LiveService } from '../modules/live/live.service';
 import { MotdService, addDaysIso, utcToday } from '../modules/motd/motd.service';
-import { GroupService } from '../modules/today/group.service';
+import { GroupService, isGlobalSlot, slotDate } from '../modules/today/group.service';
 import { LobbyService } from './lobby.service';
 import { PresenceService } from './presence.service';
 import { connectError, fail, limitEvents, ok, safely, watchExpiry } from './socket-util';
@@ -38,7 +38,7 @@ const PresenceStart = z.object({
 }).strict();
 const MeditationRef = z.object({ meditationId: z.string().uuid() }).strict();
 /** A lobby is identified by a slot: the date (daily sit) or date + UTC hour (`2026-10-12T08`, hourly sit). */
-const slot = z.string().regex(/^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]))?$/).refine((d) => date.safeParse(d.slice(0, 10)).success, 'Invalid date');
+const slot = z.string().regex(/^(G\d{4}-\d{2}-\d{2}|\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]))?)$/).refine((d) => date.safeParse(slotDate(d)).success, 'Invalid date');
 const LobbyRef = z.object({ date: slot }).strict();
 const Refresh = z.object({ token: z.string().min(20).max(4096) }).strict();
 
@@ -186,7 +186,8 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   lobbyLeave(@ConnectedSocket() socket: LiveSocket, @MessageBody() body: unknown) { return safely(() => this.leaveLobby(socket, LobbyRef.parse(body).date)); }
 
   private async joinLobby(socket: LiveSocket, d: string) {
-    if (d.slice(0, 10) < addDaysIso(utcToday(), -1) || d.slice(0, 10) > addDaysIso(utcToday(), 1)) return fail('VALIDATION_FAILED', { fields: ['date'] });
+    const ahead = isGlobalSlot(d) ? 8 : 1; // the weekly Global sit can be opened a few days before it
+    if (slotDate(d) < addDaysIso(utcToday(), -1) || slotDate(d) > addDaysIso(utcToday(), ahead)) return fail('VALIDATION_FAILED', { fields: ['date'] });
     if (!(await this.entitlements.isActive(socket.data.user.id))) return fail('PREMIUM_REQUIRED'); // group meditation is part of the membership
     if (!socket.data.lobbies.has(d) && socket.data.rooms.size + socket.data.lobbies.size >= MAX_ROOMS) return fail('ROOM_LIMIT');
     await this.lobby.join(d, socket.data.user.id, socket.data.user.country);

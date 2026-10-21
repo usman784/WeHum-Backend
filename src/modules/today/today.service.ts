@@ -102,7 +102,7 @@ export class TodayService {
     const [today, motd, live, group] = await Promise.all([
       this.config.value<TodayConfig>('today'),
       this.motd.forDate(date).then((m) => ({ ...m, fallback: false })).catch((e) => { if (e instanceof AppError && e.code === 'NOT_FOUND') return this.fallbackMotd(date); throw e; }),
-      this.live.snapshot(date), this.group.forDate(date),
+      this.live.snapshot(date), this.group.forToday(date),
     ]);
     const freeItems = plan === 'free'
       ? await this.db.select({ id: sessions.id, title: sessions.title, youtubeId: sessions.youtubeId, durationSec: sessions.durationSec }).from(sessions)
@@ -110,8 +110,9 @@ export class TodayService {
       : [];
     const dailyMessage = plan === 'member' && today.showDailyMessage ? await this.motd.messageFor(date).then((m) => ({ date: m.date, title: m.title, type: m.type, durationSec: m.durationSec ?? null })).catch(() => null) : null;
     const silence = await this.liveSvc.silence().catch(() => null);
+    const global = await this.group.nextGlobal();
     return {
-      motd, live: { total: live.total, countries: live.countries, quiet: live.quiet, meditatedToday: live.meditatedToday }, group, freeItems, dailyMessage, freeHomePick: today.freeHomePick,
+      motd, live: { total: live.total, countries: live.countries, quiet: live.quiet, meditatedToday: live.meditatedToday }, group, global, freeItems, dailyMessage, freeHomePick: today.freeHomePick,
       presence: { belts: live.belts ?? beltsOf(live.top), silenceNow: silence?.people ?? 0 },
     };
   }
@@ -138,8 +139,9 @@ export class TodayService {
   }
 
   /** `GET /v1/group/next`: the sit itself plus what the lobby and countdown screens show around it. */
-  async nextGroup(user: AppUser) {
-    const [g, details] = await Promise.all([this.group.next(), this.group.details()]);
+  async nextGroup(user: AppUser, kind: 'group' | 'global' = 'group') {
+    const [g, details] = await Promise.all([kind === 'global' ? this.group.nextGlobal() : this.group.next(), this.group.details()]);
+    if (!g) throw new AppError('NOT_FOUND', 'No Global meditation is planned');
     const [lobby, mine] = await Promise.all([
       this.lobby.state(g.date),
       this.db.select({ intention: groupIntentions.intention }).from(groupIntentions).where(and(eq(groupIntentions.userId, user.id), eq(groupIntentions.startsAt, new Date(g.startsAt)))).then((r) => r[0]?.intention ?? null),

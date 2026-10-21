@@ -38,8 +38,12 @@ export const CONFIG_SCHEMAS = {
   group: z.object({
     startUtc: hhmm, lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]), lobbyOpenMin: z.number().int().min(1).max(60), reminderMin: z.number().int().min(1).max(60),
     cadence: z.enum(['daily', 'hourly']).default('daily'),
-    hourly: z.object({ fromHourUtc: z.number().int().min(0).max(23), toHourUtc: z.number().int().min(0).max(23), lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]) }).strict()
-      .refine((h) => h.toHourUtc >= h.fromHourUtc, 'The last hour must not be before the first').default({ fromHourUtc: 6, toHourUtc: 22, lengthMin: 10 }),
+    hourly: z.object({ fromHourUtc: z.number().int().min(0).max(23), toHourUtc: z.number().int().min(0).max(23), lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]), stepHours: z.number().int().min(1).max(12).default(1) }).strict()
+      .refine((h) => h.toHourUtc >= h.fromHourUtc, 'The last hour must not be before the first').default({ fromHourUtc: 0, toHourUtc: 23, lengthMin: 30, stepHours: 4 }),
+    global: z.object({
+      enabled: z.boolean(), weekday: z.number().int().min(0).max(6), startUtc: hhmm, lengthMin: z.union([z.literal(10), z.literal(30), z.literal(45)]),
+      lobbyOpenMin: z.number().int().min(1).max(120), reminderMin: z.number().int().min(1).max(180), title: z.string().trim().min(1).max(40),
+    }).strict().default({ enabled: true, weekday: 0, startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 30, reminderMin: 60, title: 'Global meditation' }),
     intentions: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
     focus: z.object({ title: z.string().trim().max(60), summary: z.string().trim().max(120), quote: z.string().trim().max(200), attribution: z.string().trim().max(40) }).strict()
       .default({ title: '', summary: '', quote: '', attribution: 'Raphael' }),

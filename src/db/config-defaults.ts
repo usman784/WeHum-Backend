@@ -13,7 +13,8 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   today: { emptyRoomThreshold: 10, freeHomePick: 'random', showDailyMessage: false, sections: { progress: true, liveCounter: true, worldMap: true } },
   group: {
     startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 15, reminderMin: 10,
-    cadence: 'daily', hourly: { fromHourUtc: 6, toHourUtc: 22, lengthMin: 10 },
+    cadence: 'daily', hourly: { fromHourUtc: 0, toHourUtc: 23, lengthMin: 30, stepHours: 4 },
+    global: { enabled: true, weekday: 0, startUtc: '16:00', lengthMin: 30, lobbyOpenMin: 30, reminderMin: 60, title: 'Global meditation' },
     intentions: ['Calm under pressure', 'Deep physical release', 'Mindful stillness'],
     focus: { title: '', summary: '', quote: '', attribution: 'Raphael' }, doorsOpenSec: 60,
   },

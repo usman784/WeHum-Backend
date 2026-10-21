@@ -9,9 +9,14 @@ import { CONFIG_DEFAULTS } from '../../db/config-defaults';
 
 export interface MainConfig { minVersion: { ios: string; android: string }; latestVersion?: { ios: string; android: string }; storeUrls?: { ios: string; android: string }; maintenance: boolean; features: Record<string, boolean>; supportEmail: string; defaultReminderTime: string; languages: string[] }
 export interface TodayConfig { emptyRoomThreshold: number; freeHomePick: 'random' | 'newest'; showDailyMessage: boolean; sections: Record<string, boolean> }
+export interface GlobalSitConfig { enabled: boolean; weekday: number; startUtc: string; lengthMin: number; lobbyOpenMin: number; reminderMin: number; title: string }
 export interface GroupConfig {
   startUtc: string; lengthMin: number; lobbyOpenMin: number; reminderMin: number;
-  cadence?: 'daily' | 'hourly'; hourly?: { fromHourUtc: number; toHourUtc: number; lengthMin: number };
+  cadence?: 'daily' | 'hourly';
+  /** Group sits through the day: from the first hour to the last, every `stepHours` (default 1; 4 = 00, 04, 08, 12, 16, 20 UTC). */
+  hourly?: { fromHourUtc: number; toHourUtc: number; lengthMin: number; stepHours?: number };
+  /** The Global meditation: once a week, everyone at the same time (a different thing from the group sits). */
+  global?: GlobalSitConfig;
   intentions?: string[]; focus?: { title: string; summary: string; quote: string; attribution: string }; doorsOpenSec?: number;
 }
 export interface BrandingConfig { appName: string; tagline: string; logoMediaId: string | null }

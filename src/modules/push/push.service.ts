@@ -177,10 +177,13 @@ export class PushService {
       if (now < warnAt || now >= warnAt + 60_000) continue;
       if ((await this.redis.set(`push:group:${slot}:${g.startsAt}`, '1', 'EX', 86_400, 'NX')) !== 'OK') continue;
       const reminded = await this.redis.smembers(`lobby:remind:${slot}`).catch(() => [] as string[]);
-      const opted = slot.length === 10 ? await this.db.select({ id: users.id }).from(users).where(and(eq(users.groupWarning, true), sql`${users.deletedAt} is null`)) : [];
+      const isGlobal = slot.startsWith('G');
+      const opted = slot.length === 10 || isGlobal ? await this.db.select({ id: users.id }).from(users).where(and(eq(users.groupWarning, true), sql`${users.deletedAt} is null`)) : [];
       const ids = [...new Set([...reminded, ...opted.map((o) => o.id)])];
       const time = new Date(g.startsAt).toISOString().slice(11, 16);
-      const r = await this.deliver(ids, { title: auto.title, body: fill(auto.body, { title: g.title ?? 'The Meditation of the Day', time: `${time} UTC`, waiting: g.waiting }), type: 'group_warning', deepLink: 'wehum://group', inbox: true });
+      const r = isGlobal
+        ? await this.deliver(ids, { title: `${g.title ?? 'Global meditation'} in ${g.reminderMin} minutes`, body: `Everyone sits together at ${time} UTC. ${g.waiting} people are already in the lobby.`, type: 'group_warning', deepLink: 'wehum://global', inbox: true })
+        : await this.deliver(ids, { title: auto.title, body: fill(auto.body, { title: g.title ?? 'The Meditation of the Day', time: `${time} UTC`, waiting: g.waiting }), type: 'group_warning', deepLink: 'wehum://group', inbox: true });
       await this.count('group_warning', r.delivered.length);
       total += r.delivered.length;
     }

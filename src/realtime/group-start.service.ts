@@ -6,7 +6,7 @@ import { DRIZZLE, type DB } from '../infra/core.module';
 import { RealtimeBus } from '../infra/realtime-bus';
 import { K, REDIS } from '../infra/redis';
 import { QUEUES, QueueService } from '../jobs/queues';
-import { GroupService } from '../modules/today/group.service';
+import { GroupService, slotDate } from '../modules/today/group.service';
 import { metrics } from '../infra/metrics';
 
 /** Look-ahead: group starts within this window get a delayed job (spec §8.1). */
@@ -48,10 +48,10 @@ export class GroupStartService {
     const wait = expectedStartsAt - Date.now();
     if (wait > 0 && wait <= 2 * LEAD_MS) await new Promise((r) => setTimeout(r, wait)); // on the dot (a manual call far ahead of T0 does not wait)
     metrics.groupStart.set(Date.now() / 1000);
-    await this.bus.publish('group:start', { date, startsAt: g.startsAt, sessionId: g.sessionId, lengthMin: g.lengthMin, mediaKey: `motd:${date.slice(0, 10)}:${g.lengthMin}` });
+    await this.bus.publish('group:start', { date, startsAt: g.startsAt, sessionId: g.sessionId, lengthMin: g.lengthMin, mediaKey: `motd:${slotDate(date)}:${g.lengthMin}` });
     const waiting = await this.redis.zcount(K.lobby(date), now - 90_000, '+inf');
     if (date.length === 10) await this.db.update(motdDays).set({ groupJoined: waiting, updatedAt: sql`now()` }).where(eq(motdDays.date, date));
-    else await this.db.update(motdDays).set({ groupJoined: sql`${motdDays.groupJoined} + ${waiting}`, updatedAt: sql`now()` }).where(eq(motdDays.date, date.slice(0, 10)));
+    else await this.db.update(motdDays).set({ groupJoined: sql`${motdDays.groupJoined} + ${waiting}`, updatedAt: sql`now()` }).where(eq(motdDays.date, slotDate(date)));
     return true;
   }
 }
