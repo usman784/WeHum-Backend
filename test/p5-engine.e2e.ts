@@ -285,7 +285,7 @@ describe('P5 ticker: publishes only what changed', () => {
 
   it('lobby:state and motd:stats follow their data', async () => {
     const date = dayIso();
-    expect(await ticker.lobbyTick()).toBe(2); // first look at today + tomorrow
+    expect(await ticker.lobbyTick()).toBe(3); // first look at today + tomorrow, and the coming weekly Global meditation
     expect(await ticker.lobbyTick()).toBe(0);
     await lobby.join(date, 'u1', 'DE'); await lobby.join(date, 'u2', 'JP');
     expect(await ticker.lobbyTick()).toBe(1);
