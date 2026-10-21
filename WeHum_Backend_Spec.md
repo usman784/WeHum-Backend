@@ -489,7 +489,7 @@ Auth column:
 | `POST` | `/v1/programs/{id}/days/{day}/complete` | member | Complete program day | no rest days / no grace |
 | | **Dedications** | | | |
 | `GET` | `/v1/sessions/{id}/dedications` | device | Dedications for a session (cursor, 20) | excludes blocked users; anyone can read |
-| `POST` | `/v1/dedications` | member+account | Post dedication after a finished meditation | body {meditationId, text ≤ 200}; 3/day (DEDICATION_LIMIT); links blocked (DEDICATION_LINKS) |
+| `POST` | `/v1/dedications` | member+account | Post dedication after a finished meditation, or at any time for a session | body {meditationId **or** sessionId, text ≤ 200}; 3/day (DEDICATION_LIMIT); links blocked (DEDICATION_LINKS) |
 | `PUT` | `/v1/dedications/{id}/hold` | device | "Holding this" on |  |
 | `DELETE` | `/v1/dedications/{id}/hold` | device | "Holding this" off |  |
 | `POST` | `/v1/dedications/{id}/report` | device | Report (reason, block?) | auto-hide at 3 reports |
@@ -1546,3 +1546,9 @@ Migrations `0009_profile_bio` (`users.bio`, 200 characters) and `0010_newsletter
 - **YouTube description:** `POST /v1/admin/youtube/resolve` also returns `description` (Data API with a key, otherwise the public watch page; ≤ 4,000 characters); `POST /v1/admin/youtube/descriptions {all?}` fills the items that have none and bumps the catalog. The catalog already carries `description`.
 - **Notifications:** the merged "message + reminder" push counts once against `push.maxPerDay` (it used to count twice, so one push used the whole cap of 2); daily nudge, daily message and group warning pushes are also written to the in-app inbox; reminder and untimed message link to `wehum://motd`, a timed daily message to `wehum://message/{date}`.
 Tests: `test/p14-tickets.e2e.ts` (bio, e-mail conflicts, newsletter, YouTube description) and the extended `p8-push.e2e.ts`.
+
+### Ticket: dedications at any time (2026-10-21)
+- **Client ask:** dedications are always visible on the meditation details and in the player, and a member can write one at any time (before, during or after a sit), not only on the complete screen.
+- **Contract:** `POST /v1/dedications` takes `meditationId` (complete screen, unchanged rules) **or** `sessionId` (details/player). Exactly one is required (400 otherwise). With `sessionId` the session must be `live` (`NOT_FOUND`), and several posts per session are allowed. Who may post (member + account), the 3-a-day limit (now counted on the person's local date for session posts, shared with the complete screen), link/profanity/crisis filters, mute and `dedication:new` are the same for both.
+- **Decision:** no migration. A session post stores a fresh uuid in `meditation_id` (unique, no FK), the same way the teacher's CMS posts already do. Old app builds keep sending `meditationId` and are not affected.
+- Tests: `test/p7-community.e2e.ts` 20/20 (new: posting by session).

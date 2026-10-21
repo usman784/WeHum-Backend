@@ -117,6 +117,29 @@ describe('P7 posting', () => {
     await clearRates();
   });
 
+  it('at any time from the details or the player: by session, members only, same limit and filters', async () => {
+    const sid = await session();
+    const bySession = (w: { token: string }, text: string, sessionId = sid) => http(app).post('/v1/dedications', { sessionId, text }, { token: w.token });
+    const free = await guest(app);
+    expect((await bySession({ token: free.accessToken }, 'x')).status).toBe(403);
+    const w = await writer('Mia', 'FR');
+    expect((await http(app).post('/v1/dedications', { text: 'neither' }, { token: w.token })).status).toBe(400);
+    expect((await http(app).post('/v1/dedications', { sessionId: sid, meditationId: uuid(), text: 'both' }, { token: w.token })).status).toBe(400);
+    expect((await bySession(w, 'unknown', uuid())).body.error.code).toBe('NOT_FOUND');
+    expect((await bySession(w, 'visit www.spam.com')).body.error.code).toBe('DEDICATION_LINKS');
+    const r = await bySession(w, 'For my grandfather.');
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ status: 'visible', dedicationsLeftToday: 2 });
+    const [row] = await q(`SELECT * FROM dedications WHERE id=$1`, [r.body.data.id]);
+    expect(row).toMatchObject({ session_id: sid, first_name: 'Mia', country: 'FR' });
+    await settle();
+    expect(bus.some((e) => e.topic === 'dedication:new' && e.payload.sessionId === sid && e.payload.items[0].id === r.body.data.id)).toBe(true);
+    expect((await bySession(w, 'a second one')).status).toBe(201); // not one per meditation: several from the same session
+    expect((await post(w, await meditate(w.id), 'after the sit')).status).toBe(201); // shares the daily limit with the complete screen
+    expect((await bySession(w, 'one too many')).body.error.code).toBe('DEDICATION_LIMIT');
+    await clearRates();
+  });
+
   it('profanity and crisis posts are accepted but held back; crisis tells the app to show help', async () => {
     const w = await writer();
     const bad = await post(w, await meditate(w.id), 'what the fuck');

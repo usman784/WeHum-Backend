@@ -6,7 +6,9 @@ import { AppError } from '../../common/errors';
 import { Zod } from '../../common/zod';
 import { CommunityService, REPORT_REASONS } from './community.service';
 
-const PostDto = z.object({ meditationId: z.string().uuid(), text: z.string().max(400), locationMode: z.enum(['city', 'worldwide']).default('worldwide') }).strict(); // the 200-character limit is checked after trimming (below)
+// Either a finished meditation (complete screen) or a session the person is looking at or playing (details, player): exactly one.
+const PostDto = z.object({ meditationId: z.string().uuid().optional(), sessionId: z.string().uuid().optional(), text: z.string().max(400), locationMode: z.enum(['city', 'worldwide']).default('worldwide') }).strict() // the 200-character limit is checked after trimming (below)
+  .refine((b) => !!b.meditationId !== !!b.sessionId, { message: 'Send meditationId or sessionId', path: ['sessionId'] });
 const ReportDto = z.object({ reason: z.enum(REPORT_REASONS), block: z.boolean().optional() }).strict();
 const ListQuery = z.object({ cursor: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(50).default(20) });
 const Id = new Zod(z.string().uuid());

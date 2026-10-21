@@ -543,7 +543,7 @@ paths:
       operationId: post_v1_dedications
       tags: ["Dedications"]
       summary: "Post dedication after a finished meditation"
-      description: "Auth: member+account. body {meditationId, text \u2264 200}; 3/day (DEDICATION_LIMIT); links blocked (DEDICATION_LINKS)"
+      description: "Auth: member+account. body {meditationId or sessionId, text \u2264 200}; sessionId = at any time from details/player; 3/day (DEDICATION_LIMIT); links blocked (DEDICATION_LINKS)"
       requestBody: {required: false, content: {application/json: {schema: {type: object}}}}
       responses:
         '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}

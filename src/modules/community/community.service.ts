@@ -7,6 +7,7 @@ import type { AppUser } from '../../common/auth';
 import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination';
 import { dedicationHolds, dedications, meditations, reports, sessions, userBlocks, users } from '../../db/schema';
 import { placeLabel } from './place';
+import { localDate } from '../meditations/meditation.rules';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { RealtimeBus } from '../../infra/realtime-bus';
 import { K, REDIS } from '../../infra/redis';
@@ -45,17 +46,30 @@ export class CommunityService {
   async announceCount() { await this.bus.publish('moderation:count', { open: await this.openCount() }); }
 
   // ───────────── app: post
-  async post(user: AppUser, b: { meditationId: string; text: string; locationMode?: 'city' | 'worldwide' }) {
+  /**
+   * A member dedicates to a meditation: after a finished sit (`meditationId`, complete screen) or at any time from the
+   * details or the player (`sessionId`). Both share the daily limit and the filters.
+   */
+  async post(user: AppUser, b: { meditationId?: string; sessionId?: string; text: string; locationMode?: 'city' | 'worldwide' }) {
     const rules = await this.rules();
-    const [m] = await this.db.select().from(meditations).where(and(eq(meditations.id, b.meditationId), eq(meditations.userId, user.id)));
-    if (!m || !m.counted || !m.completed || !m.sessionId || Date.now() - m.endedAt.getTime() > DAY_MS) throw new AppError('MEDITATION_REQUIRED', 'Finish a meditation first');
+    let target: { sessionId: string; meditationId: string; localDate?: string };
+    if (b.meditationId) {
+      const [m] = await this.db.select().from(meditations).where(and(eq(meditations.id, b.meditationId), eq(meditations.userId, user.id)));
+      if (!m || !m.counted || !m.completed || !m.sessionId || Date.now() - m.endedAt.getTime() > DAY_MS) throw new AppError('MEDITATION_REQUIRED', 'Finish a meditation first');
+      target = { sessionId: m.sessionId, meditationId: m.id, localDate: m.localDate };
+    } else {
+      const [s] = await this.db.select({ id: sessions.id }).from(sessions).where(and(eq(sessions.id, b.sessionId!), eq(sessions.status, 'live')));
+      if (!s) throw new AppError('NOT_FOUND', 'Meditation not found');
+      // not tied to a sit: a fresh id keeps the one-per-meditation unique key free (as for the teacher's posts)
+      target = { sessionId: s.id, meditationId: uuidv7() };
+    }
     const text = b.text.trim().replace(/\s+/g, ' ');
     if (!text) throw new AppError('VALIDATION_FAILED', 'Write something first', { fields: [{ path: 'text', message: 'Required' }] });
     if (rules.blockLinks && hasLink(text)) throw new AppError('DEDICATION_LINKS', 'Links and handles are not allowed');
     const [u] = await this.db.select().from(users).where(eq(users.id, user.id));
     if (!u) throw new AppError('NOT_FOUND', 'User not found');
 
-    const limitKey = K.dedLimit(user.id, m.localDate);
+    const limitKey = K.dedLimit(user.id, target.localDate ?? localDate(new Date(), u.timezone));
     const used = await this.redis.incr(limitKey);
     if (used === 1) await this.redis.expire(limitKey, 3 * 86_400);
     if (used > rules.dailyLimit) { await this.redis.decr(limitKey); throw new AppError('DEDICATION_LIMIT', `At most ${rules.dailyLimit} per day`); }
@@ -68,7 +82,7 @@ export class CommunityService {
     let row: Row;
     try {
       [row] = await this.db.insert(dedications).values({
-        id: uuidv7(), sessionId: m.sessionId, userId: user.id, meditationId: m.id, firstName: u.firstName?.trim() || 'Someone',
+        id: uuidv7(), sessionId: target.sessionId, userId: user.id, meditationId: target.meditationId, firstName: u.firstName?.trim() || 'Someone',
         country: u.showCountry ? u.country : null, place: b.locationMode === 'city' && u.showCountry ? placeLabel(u.timezone, u.country) : null, text, status, autoFlags: flags,
       }).returning() as [Row];
     } catch (e) {
