@@ -258,6 +258,28 @@ describe('P5 ticker: publishes only what changed', () => {
     expect(ev('live:agg')).toHaveLength(3);
   });
 
+  it('silence:live carries the Silence Room by country (map + where people are meditating), never who; the CMS gets it too', async () => {
+    events.length = 0;
+    await start(uuid(), { mode: 'silence', country: 'PK' });
+    await start(uuid(), { mode: 'silence', country: 'PK' });
+    await start(uuid(), { mode: 'silence', country: 'GB' });
+    await start(uuid(), { mode: 'silence', country: HIDDEN_COUNTRY }); // counted, never shown
+    await start(uuid(), { mode: 'solo', country: 'US' }); // not in the Silence Room
+    await ticker.presenceTick(); await sleep(30);
+    const sil = ev('silence:live').at(-1);
+    expect(sil).toMatchObject({ people: 4, countries: 2, top: [{ c: 'PK', n: 2 }, { c: 'GB', n: 1 }], todayTop: [] });
+    expect(sil.belts.emea + sil.belts.apac).toBeGreaterThanOrEqual(3);
+    expect(JSON.stringify(sil)).not.toMatch(/user|meditationId/);
+    const k = await ticker.kpis();
+    expect(k).toMatchObject({ silenceNow: 4, silenceCountries: [{ c: 'PK', n: 2 }, { c: 'GB', n: 1 }] });
+    const n = ev('silence:live').length;
+    await redis.del('live:rows'); await ticker.presenceTick(); await sleep(30);
+    expect(ev('silence:live')).toHaveLength(n); // nothing moved: nothing published
+    await start(uuid(), { mode: 'silence', country: 'GB' });
+    await redis.del('live:rows'); await ticker.presenceTick(); await sleep(30);
+    expect(ev('silence:live').at(-1).top).toEqual([{ c: 'GB', n: 2 }, { c: 'PK', n: 2 }]); // a new country count goes out at once
+  });
+
   it('session:live only for changed sessions, with a final zero when a session empties', async () => {
     const s1 = uuid(), s2 = uuid(), a = uuid(), b = uuid(), id = uuid();
     await presence.start({ meditationId: id, userId: a, sessionId: s1, country: 'DE', mode: 'solo' });

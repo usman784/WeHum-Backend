@@ -13,7 +13,7 @@ import { AuthService } from '../modules/auth/auth.service';
 import { TokensService, type AppClaims } from '../modules/auth/tokens.service';
 import { ConfigService, type MainConfig } from '../modules/config/config.service';
 import { EntitlementService } from '../modules/entitlements/entitlement.service';
-import { LiveService } from '../modules/live/live.service';
+import { LiveService, silenceLive } from '../modules/live/live.service';
 import { MotdService, addDaysIso, utcToday } from '../modules/motd/motd.service';
 import { GroupService, isGlobalSlot, slotDate } from '../modules/today/group.service';
 import { LobbyService } from './lobby.service';
@@ -149,7 +149,7 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   /** Sends the current state of a room right after joining, so the screen is never empty until the next tick. */
   private async snapshotFor(socket: LiveSocket, room: string) {
     if (room === 'today' || room === 'world') socket.emit('live:agg', await this.live.snapshot(utcToday()));
-    else if (room === 'silence') { const s = await this.live.silence(); socket.emit('silence:live', { people: s.people, belts: s.belts, quiet: s.quiet, at: s.at }); }
+    else if (room === 'silence') { const s = await this.live.silence(); socket.emit('silence:live', silenceLive(s, s.at)); }
     else if (room.startsWith('session:')) socket.emit('session:live', { sessionId: room.slice(8), ...(await this.presence.sessionLive(room.slice(8))) });
     else if (room.startsWith('motd:')) socket.emit('motd:stats', { date: room.slice(5), practicedToday: await this.redis.scard(K.practiced(room.slice(5))) });
   }

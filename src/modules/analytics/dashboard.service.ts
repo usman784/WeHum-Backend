@@ -33,7 +33,7 @@ export class DashboardService {
       this.analytics.topSessions(7, 5),
       this.db.execute<{ date: string; title: string; lengths: number[] }>(sql`SELECT d.date::text, s.title, coalesce((SELECT array_agg(v.length_min ORDER BY v.length_min) FROM motd_variants v JOIN media_assets a ON a.id = v.media_id AND a.status = 'ready' WHERE v.date = d.date), '{}') AS lengths FROM motd_days d JOIN sessions s ON s.id = d.session_id WHERE d.date >= ${today}::date AND d.date <= ${addDay(today, 7)}::date ORDER BY d.date`).then((r) => r.rows),
       this.group.next(now),
-      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; streaks7?: number }) : null)).catch(() => null),
+      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; silenceCountries?: { c: string; n: number }[]; streaks7?: number }) : null)).catch(() => null),
     ]);
     const byDate = new Map(messages.map((m) => [m.date, m]));
     const attention: Record<string, unknown>[] = [];
@@ -49,7 +49,7 @@ export class DashboardService {
         liveNow: agg?.total ?? 0, liveCountries: agg?.countries ?? 0, meditationsToday: medsToday, meditationsLastWeekSameDay: medsLastWeek,
         meditationsDeltaPct: medsLastWeek ? Math.round(((medsToday - medsLastWeek) / medsLastWeek) * 1000) / 10 : null,
         payingMembers: summary.payingMembers.total, inTrial: summary.inTrial, mrrUsd: summary.mrrUsd, library: lib,
-        silenceNow: extras?.silenceNow ?? 0, streaks7: extras?.streaks7 ?? 0,
+        silenceNow: extras?.silenceNow ?? 0, silenceCountries: extras?.silenceCountries ?? [], streaks7: extras?.streaks7 ?? 0,
       },
       moderationOpen: open,
       dailyMessages: week.map((d) => ({ date: d, title: byDate.get(d)?.title ?? null, type: byDate.get(d)?.type ?? null, status: byDate.get(d)?.status ?? 'missing' })),

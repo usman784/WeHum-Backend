@@ -7,6 +7,7 @@ import { K, REDIS } from '../../infra/redis';
 import { ConfigService, type TodayConfig } from '../config/config.service';
 import { liveLine } from '../meditations/meditation.rules';
 import { HIDDEN_COUNTRY } from '../../realtime/presence.service';
+import type { SilenceLive } from '../../realtime/socket-events';
 
 /** Matches `LiveAgg` in realtime/socket-events.ts (+ `degraded` when Redis is unreachable). */
 export interface LiveSnapshot {
@@ -24,6 +25,10 @@ export interface LiveSnapshot {
   degraded?: true;
   line?: ReturnType<typeof liveLine>;
 }
+
+/** The `silence:live` socket payload from {@link LiveService.silence}. */
+export const silenceLive = (s: Awaited<ReturnType<LiveService['silence']>>, at: number): SilenceLive =>
+  ({ people: s.people, countries: s.countries, top: s.top, todayTop: s.todayTop, belts: s.belts, quiet: s.quiet, at });
 
 /** Reads the live numbers the presence engine keeps in Redis (spec §7.4). Never faked: no presence → 0. */
 @Injectable()
@@ -71,21 +76,32 @@ export class LiveService {
     return rows;
   }
 
-  /** The Silence Room live line: people sitting in silence now, by belt, plus today's total and zones. */
+  /**
+   * The Silence Room live line: people meditating in silence now, by belt and by country (`top`, for the map and
+   * "where people are meditating"), plus where people meditated in silence today (`todayTop`, the map of a quiet room).
+   * Country level only: never who.
+   */
   async silence(now = Date.now()) {
     const date = new Date(now).toISOString().slice(0, 10), dayStart = new Date(`${date}T00:00:00Z`);
     const [rows, today] = await Promise.all([
       this.presenceRows().catch(() => []),
-      this.db.execute<{ n: number; countries: string[] | null }>(sql`
-        SELECT count(*)::int AS n, array_agg(DISTINCT country) FILTER (WHERE country IS NOT NULL) AS countries
-        FROM meditations WHERE kind = 'silence' AND counted AND started_at >= ${dayStart}`).then((r) => r.rows[0]).catch(() => undefined),
+      this.db.execute<{ country: string | null; n: number }>(sql`
+        SELECT country, count(*)::int AS n FROM meditations WHERE kind = 'silence' AND counted AND started_at >= ${dayStart} GROUP BY country`).then((r) => r.rows).catch(() => []),
     ]);
     const mine = rows.filter((r) => r.mode === 'silence');
     const belts = emptyBelts();
-    for (const r of mine) { const b = beltOf(r.country); if (b) belts[b]++; }
-    const zones = new Set((today?.countries ?? []).map((c) => beltOf(c)).filter(Boolean)).size;
+    const byCountry = new Map<string, number>();
+    for (const r of mine) {
+      const b = beltOf(r.country); if (b) belts[b]++;
+      if (r.country !== HIDDEN_COUNTRY) byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + 1);
+    }
+    const rank = (m: Iterable<[string, number]>) => [...m].map(([c, n]) => ({ c, n })).filter((e) => e.n > 0).sort((a, b) => b.n - a.n || a.c.localeCompare(b.c)).slice(0, 50);
+    const top = rank(byCountry);
+    const todayTop = rank(today.filter((t) => t.country && t.country !== HIDDEN_COUNTRY).map((t) => [t.country!, Number(t.n)] as [string, number]));
+    const todayTotal = today.reduce((s, t) => s + Number(t.n), 0);
+    const zones = new Set(today.map((t) => (t.country ? beltOf(t.country) : null)).filter(Boolean)).size;
     const cfg = await this.config.value<TodayConfig>('today');
-    return { people: mine.length, belts, quiet: mine.length < cfg.emptyRoomThreshold, todayTotal: today?.n ?? 0, todayZones: zones, at: now };
+    return { people: mine.length, countries: byCountry.size, top, todayTop, belts, quiet: mine.length < cfg.emptyRoomThreshold, todayTotal, todayZones: zones, at: now };
   }
 
   /**

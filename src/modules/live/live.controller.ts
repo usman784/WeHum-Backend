@@ -39,7 +39,7 @@ export class LiveController {
     ]);
     const pick = (role: 'opening' | 'interval' | 'closing') => bells.filter((b) => !b.bellRole || b.bellRole === role).map((b) => ({ id: b.id, name: b.name, durationSec: b.durationSec, access: b.access }));
     return {
-      sittingNow: live.people, belts: live.belts, quiet: live.quiet, emptyRoomThreshold: today.emptyRoomThreshold,
+      sittingNow: live.people, countries: live.countries, top: live.top, todayTop: live.todayTop, belts: live.belts, quiet: live.quiet, emptyRoomThreshold: today.emptyRoomThreshold,
       todayTotal: live.todayTotal, todayZones: live.todayZones,
       durations: cfg.durations, cadence: cfg.cadence, extendMin: cfg.extendMin,
       bells: { opening: pick('opening'), interval: pick('interval'), closing: pick('closing') },

@@ -1664,7 +1664,7 @@ paths:
     get:
       operationId: get_v1_silence
       tags: ["Today"]
-      summary: "Silence Room: live count by belt, durations, cadence, bells"
+      summary: "Silence Room: live count by belt and by country (top, todayTop), durations, cadence, bells"
       description: "Auth: device."
       responses:
         '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}

@@ -23,6 +23,9 @@ describe('Stitch redesign endpoints', () => {
     expect(r.status).toBe(200);
     const d = r.body.data;
     expect(d.sittingNow).toEqual(expect.any(Number));
+    expect(d.countries).toEqual(expect.any(Number));
+    expect(Array.isArray(d.top)).toBe(true); // the map and "where people are meditating"
+    expect(Array.isArray(d.todayTop)).toBe(true);
     expect(Array.isArray(d.durations)).toBe(true);
     expect(d.bells).toHaveProperty('opening');
     expect(d.bells).toHaveProperty('interval');

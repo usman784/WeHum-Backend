@@ -9,7 +9,7 @@ import { DRIZZLE, type DB } from '../infra/core.module';
 import { RealtimeBus } from '../infra/realtime-bus';
 import { K, REDIS } from '../infra/redis';
 import { SchedulerService } from '../jobs/scheduler';
-import { LiveService } from '../modules/live/live.service';
+import { LiveService, silenceLive } from '../modules/live/live.service';
 import { addDaysIso } from '../modules/motd/motd.service';
 import { GroupStartService } from './group-start.service';
 import { LobbyService } from './lobby.service';
@@ -86,10 +86,10 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
       if (!(id in active) && sig !== '0:0') { this.lastSession.set(id, '0:0'); events.push({ topic: 'session:live', payload: { sessionId: id, people: 0, countries: 0 } }); }
     }
     await this.bus.publishMany(events);
-    // Silence Room line (Stitch): people sitting in silence now, by belt
+    // Silence Room (Stitch): people meditating in silence now, by belt and by country (map + list), today's countries
     const sil = await this.live.silence(now);
-    const silSig = hash({ p: sil.people, b: sil.belts });
-    if (silSig !== this.lastSilence) { this.lastSilence = silSig; await this.bus.publish('silence:live', { people: sil.people, belts: sil.belts, quiet: sil.quiet, at: now }); }
+    const silSig = hash({ p: sil.people, b: sil.belts, t: sil.top, d: sil.todayTop });
+    if (silSig !== this.lastSilence) { this.lastSilence = silSig; await this.bus.publish('silence:live', silenceLive(sil, now)); }
     return { liveAgg: published, sessions: events.length };
   }
 
@@ -121,14 +121,14 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
       this.subscriptionCounts(),
       this.db.select().from(offers).where(eq(offers.id, 'founding')).then((r) => r[0]),
       this.db.select({ n: sql<number>`count(*)::int` }).from(dedications).where(NEEDS_REVIEW).then((r) => r[0]?.n ?? 0),
-      this.live.silence(now).then((r) => r.people).catch(() => 0),
+      this.live.silence(now).catch(() => null),
       this.sevenDayRuns(),
     ]);
     return {
       liveNow: snap.total ?? 0, meditationsToday: Number(meds) || 0, minutesToday: Number(mins) || 0,
       payingMembers: subs.paying, inTrial: subs.trial, mrrUsd: subs.mrrUsd,
       founding: { taken: founding?.taken ?? 0, cap: founding?.cap ?? 0, open: !!founding?.open && (founding.taken < founding.cap) },
-      moderationOpen: flagged, silenceNow: silence, streaks7: runs, at: now,
+      moderationOpen: flagged, silenceNow: silence?.people ?? 0, silenceCountries: silence?.top ?? [], streaks7: runs, at: now,
     };
   }
 

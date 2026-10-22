@@ -18,6 +18,17 @@ export interface LiveAgg {
   at: number;                 // server ms
 }
 
+/** The Silence Room right now (room `silence`): totals, belts and countries (ISO-2, top 50), never who. */
+export interface SilenceLive {
+  people: number;
+  countries: number;
+  top: { c: string; n: number }[];
+  todayTop: { c: string; n: number }[]; // where people meditated in silence today (the map of a quiet room)
+  belts: { americas: number; emea: number; apac: number };
+  quiet: boolean;
+  at: number;
+}
+
 // ── /live (app)
 export interface LiveClientToServer {
   'room:join': (p: { room: LiveRoom }, ack: (r: Ack) => void) => void;
@@ -35,7 +46,7 @@ export interface LiveClientToServer {
 export interface LiveServerToClient {
   'live:agg': (p: LiveAgg) => void;
   'session:live': (p: { sessionId: string; people: number; countries: number }) => void;
-  'silence:live': (p: { people: number; belts: { americas: number; emea: number; apac: number }; quiet: boolean; at: number }) => void;
+  'silence:live': (p: SilenceLive) => void;
   'motd:stats': (p: { date: string; practicedToday: number }) => void;
   'lobby:state': (p: { date: string; waiting: number; countries: number; regions: { r: string; n: number }[]; byBelt?: { americas: number; emea: number; apac: number }; intentions?: Record<string, number>; startsAt: string }) => void;
   'group:start': (p: { date: string; startsAt: string; sessionId: string; lengthMin: number; mediaKey: string }) => void;
@@ -67,7 +78,7 @@ export interface AdminClientToServer {
 
 export interface AdminServerToClient {
   'entity:changed': (p: { type: EntityType; id: string; op: 'create' | 'update' | 'delete'; version: number; by: { id: string; name: string } | null }) => void;
-  'dashboard:kpis': (p: { liveNow: number; meditationsToday: number; minutesToday: number; payingMembers: number; inTrial: number; mrrUsd: number; founding: { taken: number; cap: number; open: boolean }; moderationOpen: number; at: number }) => void;
+  'dashboard:kpis': (p: { liveNow: number; meditationsToday: number; minutesToday: number; payingMembers: number; inTrial: number; mrrUsd: number; founding: { taken: number; cap: number; open: boolean }; moderationOpen: number; silenceNow?: number; silenceCountries?: { c: string; n: number }[]; at: number }) => void;
   'live:agg': (p: LiveAgg) => void;
   'moderation:new': (p: { dedication: unknown; flags: string[] }) => void;
   'moderation:count': (p: { open: number }) => void;
