@@ -78,6 +78,13 @@
       "when": 1791973800000,
       "tag": "0010_newsletter",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793181029008,
+      "tag": "0011_username_backfill",
+      "breakpoints": true
     }
   ]
 }

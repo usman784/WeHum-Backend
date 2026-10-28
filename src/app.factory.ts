@@ -7,6 +7,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from './app.module';
+import { AVATAR_BODY_LIMIT } from './modules/me/me.controller';
 import { AppErrorFilter } from './common/error.filter';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { env, isProd } from './config/env';
@@ -27,6 +28,8 @@ export async function createApp(opts: { logger?: boolean } = {}) {
     },
   });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule.forRole('api'), adapter, { logger: opts.logger === false ? false : ['error', 'warn', 'log'] });
+  // the profile photo is the one JSON body bigger than the 100 KB default (routes are added at init, after this hook)
+  app.getHttpAdapter().getInstance().addHook('onRoute', (r) => { if (r.url === '/v1/me/avatar' && r.method === 'PUT') r.bodyLimit = AVATAR_BODY_LIMIT; });
 
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(compress, { encodings: ['br', 'gzip'], threshold: 1024 });

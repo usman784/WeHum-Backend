@@ -98,6 +98,67 @@ describe('profile: username, names, photo', () => {
   });
 });
 
+describe('edit profile: accounts only, real photos, one username per person', () => {
+  const account = async (email: string, username: string) => {
+    const g = await guest(app);
+    const r = await h().post('/v1/auth/link/email', { email, password: 'Sup3r-secret-pw', firstName: 'Ana', username }, { token: g.accessToken });
+    expect(r.status).toBe(200);
+    return r.body.data.accessToken as string;
+  };
+  // a JPEG header followed by filler: passes the type check, sized like a real phone photo
+  const jpeg = (bytes: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(bytes - 4, 7)]).toString('base64');
+
+  it('a guest cannot change photo, username, last name or bio; onboarding settings still save', async () => {
+    const g = await guest(app);
+    for (const [method, url, body] of [['PUT', '/v1/me/avatar', { contentType: 'image/png', data: PNG }], ['DELETE', '/v1/me/avatar', undefined]] as const) {
+      const r = await h().request(method, url, { body, token: g.accessToken });
+      expect(r.status).toBe(403);
+      expect(r.body.error.code).toBe('ACCOUNT_REQUIRED');
+    }
+    for (const body of [{ username: 'guest.name' }, { bio: 'hello' }, { lastName: 'Doe' }]) {
+      const r = await h().patch('/v1/me', body, { token: g.accessToken });
+      expect(r.status).toBe(403);
+      expect(r.body.error.code).toBe('ACCOUNT_REQUIRED');
+    }
+    const ok = await h().patch('/v1/me', { firstName: 'Mia', theme: 'light', reminderTime: '08:00' }, { token: g.accessToken });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data).toMatchObject({ firstName: 'Mia', theme: 'light', username: null, avatarUrl: null });
+  });
+
+  it('a phone-sized photo (hundreds of KB) uploads; anything over the route limit is 413', async () => {
+    const t = await account('photo@x.test', 'photo.person');
+    const up = await h().request('PUT', '/v1/me/avatar', { body: { contentType: 'image/jpeg', data: jpeg(300_000) }, token: t });
+    expect(up.status).toBe(200);
+    expect(up.body.data.avatarUrl).toMatch(/avatars\/.+\.jpg$/);
+    const huge = await h().request('PUT', '/v1/me/avatar', { body: { contentType: 'image/jpeg', data: jpeg(900_000) }, token: t });
+    expect(huge.status).toBe(413);
+    // other routes keep the small limit
+    expect((await h().patch('/v1/me', { bio: 'x'.repeat(150_000) }, { token: t })).status).toBe(413);
+  });
+
+  it('two people claiming the same free username at once: one gets it, the other a clean 409', async () => {
+    const [a, b] = await Promise.all([account('race1@x.test', 'race.one'), account('race2@x.test', 'race.two')]);
+    const rs = await Promise.all([a, b].map((t) => h().patch('/v1/me', { username: 'same.name' }, { token: t })));
+    expect(rs.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(rs.find((r) => r.status === 409)!.body.error.code).toBe('ALREADY_EXISTS');
+    expect((await q(`SELECT 1 FROM users WHERE username = 'same.name'`)).length).toBe(1);
+  });
+
+  it('backfill: every account without a username gets a unique one; guests are left alone', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync(`${process.cwd()}/drizzle/0011_username_backfill.sql`, 'utf8');
+    const g = await guest(app);
+    const ids = [(await import('uuid')).v7(), (await import('uuid')).v7()];
+    for (const id of ids) await q(`INSERT INTO users (id, is_guest, email, first_name) VALUES ($1, false, $2, 'Old')`, [id, `${id}@x.test`]);
+    for (const stmt of sql.split('--> statement-breakpoint')) if (stmt.trim()) await q(stmt);
+    const rows = await q<{ username: string }>(`SELECT username FROM users WHERE id = ANY($1)`, [ids]);
+    expect(rows.every((r) => validateUsername(r.username).ok)).toBe(true);
+    expect(new Set(rows.map((r) => r.username)).size).toBe(2);
+    expect((await q(`SELECT username FROM users WHERE id = $1`, [g.me.id]))[0]!.username).toBeNull();
+    expect((await q(`SELECT 1 FROM users WHERE NOT is_guest AND username IS NULL`)).length).toBe(0);
+  });
+});
+
 describe('branding, push cap and daily-message schedule', () => {
   it('bootstrap carries the app name and logo from Settings', async () => {
     const g = await guest(app);

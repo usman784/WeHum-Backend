@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { eq } from 'drizzle-orm';
 import { v7 as uuid } from 'uuid';
 import { z } from 'zod';
-import { CurrentUser, RateLimit, type AppUser } from '../../common/auth';
+import { Account, CurrentUser, RateLimit, type AppUser } from '../../common/auth';
 import { AppError } from '../../common/errors';
 import { Zod } from '../../common/zod';
 import { users } from '../../db/schema';
@@ -32,7 +32,12 @@ const PatchMe = z.object({
   weeklyGoal: z.number().int().min(1).max(7).optional(),
 }).strict();
 const UsernameQuery = z.object({ u: z.string().max(40).optional(), seed: z.string().max(80).optional() });
-const AvatarBody = z.object({ contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']), data: z.string().min(100).max(2_000_000) }).strict();
+/** Request size for the photo route only (the API's default is 100 KB); stays under nginx's 1 MB. */
+export const AVATAR_BODY_LIMIT = 1_000_000;
+const AVATAR_MAX_BYTES = 700_000;
+const AvatarBody = z.object({ contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']), data: z.string().min(100).max(AVATAR_BODY_LIMIT) }).strict();
+/** What makes up a person's public identity: only accounts can set it (guests keep the first name from onboarding). */
+const IDENTITY = ['username', 'lastName', 'bio'] as const;
 const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' } as const;
 
 @ApiTags('Me')
@@ -50,6 +55,7 @@ export class MeController {
    */
   @Patch()
   async update(@CurrentUser() u: AppUser, @Body(new Zod(PatchMe)) b: z.infer<typeof PatchMe>) {
+    if (u.isGuest && IDENTITY.some((k) => b[k] !== undefined)) throw new AppError('ACCOUNT_REQUIRED', 'Create an account to edit your profile');
     const { username, bio, ...rest } = b;
     const patch: Partial<typeof users.$inferInsert> = { ...rest };
     if (bio !== undefined) patch.bio = bio ? bio : null;
@@ -58,7 +64,16 @@ export class MeController {
       const next = await this.usernames.assertChange(u.id, cur ?? { username: null, usernameChangedAt: null }, username);
       if (next !== cur?.username?.toLowerCase()) { patch.username = next; if (cur?.username) patch.usernameChangedAt = new Date(); }
     }
-    if (Object.keys(patch).length) await this.db.update(users).set({ ...patch, lastActiveAt: new Date() }).where(eq(users.id, u.id));
+    if (Object.keys(patch).length) {
+      try {
+        await this.db.update(users).set({ ...patch, lastActiveAt: new Date() }).where(eq(users.id, u.id));
+      } catch (e) {
+        // someone took the same name between the check and the write: the unique index decides, the loser gets a clean 409
+        const code = (e as { code?: string }).code ?? (e as { cause?: { code?: string } }).cause?.code;
+        if (code === '23505' && patch.username) throw new AppError('ALREADY_EXISTS', 'That username is taken', { suggestions: await this.usernames.suggest(patch.username, 3) });
+        throw e;
+      }
+    }
     return this.auth.me(u.id);
   }
 
@@ -74,11 +89,11 @@ export class MeController {
   @RateLimit('username', 60, 60) @Get('username/suggest')
   async suggest(@Query(new Zod(UsernameQuery)) q: z.infer<typeof UsernameQuery>) { return { suggestions: await this.usernames.suggest(q.seed ?? q.u, 5) }; }
 
-  /** Profile photo as base64 (the app sends a ~512 px JPEG). Replaces the previous photo. */
-  @RateLimit('avatar', 10, 60) @HttpCode(200) @Put('avatar')
+  /** Profile photo as base64 (the app sends a ~512 px JPEG). Replaces the previous photo. Accounts only. */
+  @Account() @RateLimit('avatar', 10, 60) @HttpCode(200) @Put('avatar')
   async setAvatar(@CurrentUser() u: AppUser, @Body(new Zod(AvatarBody)) b: z.infer<typeof AvatarBody>) {
     const buf = Buffer.from(b.data, 'base64');
-    if (buf.length < 100 || buf.length > 1_500_000) throw new AppError('VALIDATION_FAILED', 'The photo must be under 1.5 MB');
+    if (buf.length < 100 || buf.length > AVATAR_MAX_BYTES) throw new AppError('VALIDATION_FAILED', 'The photo must be under 700 KB');
     const ok = (b.contentType === 'image/jpeg' && buf[0] === 0xff && buf[1] === 0xd8) || (b.contentType === 'image/png' && buf[0] === 0x89 && buf[1] === 0x50) || (b.contentType === 'image/webp' && buf.subarray(8, 12).toString() === 'WEBP');
     if (!ok) throw new AppError('VALIDATION_FAILED', 'That is not a valid image');
     const key = `avatars/${u.id}/${uuid()}.${EXT[b.contentType]}`;
@@ -87,6 +102,6 @@ export class MeController {
     return this.auth.me(u.id);
   }
 
-  @HttpCode(200) @Delete('avatar')
+  @Account() @HttpCode(200) @Delete('avatar')
   async removeAvatar(@CurrentUser() u: AppUser) { await this.db.update(users).set({ avatarUrl: null }).where(eq(users.id, u.id)); return this.auth.me(u.id); }
 }

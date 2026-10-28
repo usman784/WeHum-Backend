@@ -30,8 +30,11 @@ afterAll(async () => { await db?.end(); await app?.close(); });
 const google = (sub: string, email: string) => signGoogle({ sub, email, email_verified: true, name: 'Gina Google', picture: 'https://lh3.example/p.jpg' });
 
 describe('profile bio', () => {
-  it('is saved, shown, limited to 200 characters and can be cleared', async () => {
-    const g = await guest(app);
+  it('is saved, shown, limited to 200 characters and can be cleared (accounts only)', async () => {
+    const guestOnly = await guest(app);
+    expect((await h().patch('/v1/me', { bio: 'hello' }, { token: guestOnly.accessToken })).body.error.code).toBe('ACCOUNT_REQUIRED');
+    const link = await h().post('/v1/auth/link/email', { email: 'bio@x.test', password: 'Sup3r-secret-pw', firstName: 'Bea', username: 'bea.bio' }, { token: (await guest(app)).accessToken });
+    const g = { accessToken: link.body.data.accessToken as string };
     const r = await h().patch('/v1/me', { bio: '  Sitting every morning.  ' }, { token: g.accessToken });
     expect(r.status).toBe(200);
     expect(r.body.data.bio).toBe('Sitting every morning.');
