@@ -122,9 +122,11 @@ export class TodayService {
     const plan = (await this.entitlements.isActive(user.id)) ? 'member' : 'free';
     const [shared, profile, main] = await Promise.all([this.cache.getOrSet(K.today(date, plan), 30, () => this.buildShared(date, plan)), this.progress.profile(user.id), this.config.value<MainConfig>('main')]);
     const tz = profile.tz;
+    // a guest sees no progress or streak (zeros, not a missing field, so older app builds still read it)
+    const noWeek = { minutes: 0, meditations: 0, daysThisWeek: Array(7).fill(false) as boolean[] };
     const [week, program, streak, continueLast] = await Promise.all([
-      this.progress.week(user.id, tz), this.programCard(user.id, tz),
-      main.features?.streaks === false ? null : this.progress.streak(user.id, tz, profile.weeklyGoal),
+      user.isGuest ? noWeek : this.progress.week(user.id, tz), this.programCard(user.id, tz),
+      user.isGuest || main.features?.streaks === false ? null : this.progress.streak(user.id, tz, profile.weeklyGoal),
       this.continueLast(user.id),
     ]);
     const { freeItems, freeHomePick, ...rest } = shared;

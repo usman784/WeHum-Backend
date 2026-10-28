@@ -10,7 +10,7 @@ import { CountersService } from '../src/modules/meditations/counters.service';
 import { isCounted, localDate } from '../src/modules/meditations/meditation.rules';
 import { StatsProcessor } from '../src/modules/meditations/stats.processor';
 import { ProgressService } from '../src/modules/me/progress.service';
-import { bootApp, clearRates, guest, http, member, resetTestDb } from './helpers';
+import { account, bootApp, clearRates, guest, http, member, resetTestDb } from './helpers';
 
 let app: NestFastifyApplication;
 let db: Client;
@@ -347,8 +347,19 @@ describe('P4 progress (no streaks)', () => {
     expect(empty.bars).toHaveLength(1);
   });
 
-  it('GET /v1/me/progress: validates the period, uses my time zone, is private', async () => {
-    const g = await guest(app);
+  it('the answer to a finished meditation carries a streak for an account, none for a guest', async () => {
+    const visitor = await guest(app), acct = await account(app);
+    expect((await h().post('/v1/meditations', med({}, 600), { token: visitor.accessToken })).body.data.streak).toBeNull();
+    expect((await h().post('/v1/meditations', med({}, 600), { token: acct.accessToken })).body.data.streak).toMatchObject({ current: 1 });
+  });
+
+  it('GET /v1/me/progress: accounts only; validates the period, uses my time zone, is private', async () => {
+    const visitor = await guest(app);
+    await h().post('/v1/meditations', med({}, 600), { token: visitor.accessToken }); // still recorded: it moves into the account on sign-up
+    const refused = await h().get('/v1/me/progress', { token: visitor.accessToken });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe('ACCOUNT_REQUIRED');
+    const g = await account(app);
     await tzOf(g.me.id, 'Pacific/Kiritimati'); // UTC+14
     await h().post('/v1/meditations', med({}, 600), { token: g.accessToken });
     await drain();
@@ -366,7 +377,7 @@ describe('P4 progress (no streaks)', () => {
 
 describe('P4 performance (in-process, excluding network)', () => {
   it('POST /v1/meditations p95 < 150 ms; progress p95 < 120 ms', async () => {
-    const g = await guest(app);
+    const g = await account(app);
     const pctl = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * p))]!;
     const rec: number[] = [], prog: number[] = [];
     for (let i = 0; i < 120; i++) {

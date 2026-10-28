@@ -105,7 +105,7 @@ export class MeditationsService {
         ? this.db.select({ n: sql<number>`count(distinct ${meditations.userId})::int` }).from(meditations).where(and(eq(meditations.sessionId, m.sessionId), eq(meditations.completed, true), eq(meditations.counted, true), sql`${meditations.startedAt} >= ${dayStart}`))
         : Promise.resolve([{ n: 0 }]),
     ]);
-    const streak = main.features?.streaks === false ? null : computeStreak(m.counted ? [...dates.map((x) => x.d), m.localDate] : dates.map((x) => x.d), m.localDate, { weeklyGoal: prof.weeklyGoal });
+    const streak = isGuest || main.features?.streaks === false ? null : computeStreak(m.counted ? [...dates.map((x) => x.d), m.localDate] : dates.map((x) => x.d), m.localDate, { weeklyGoal: prof.weeklyGoal });
     const minutesToday = Number(await this.redis.get(K.minsToday(m.localDate)).catch(() => 0)) || 0;
     return {
       id: m.id, counted: m.counted, localDate: m.localDate,

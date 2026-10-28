@@ -8,7 +8,7 @@ import { K, REDIS } from '../src/infra/redis';
 import { QUEUES, QueueService } from '../src/jobs/queues';
 import { WorkerRunner } from '../src/jobs/workers';
 import { GroupService } from '../src/modules/today/group.service';
-import { bootApp, clearRates, guest, http, member, resetTestDb } from './helpers';
+import { account, bootApp, clearRates, guest, http, member, resetTestDb } from './helpers';
 
 let app: NestFastifyApplication;
 let db: Client;
@@ -254,8 +254,21 @@ describe('P4 GET /v1/today', () => {
     await redis.del(K.medsToday(dayIso()));
   });
 
-  it('ETag/304, and it changes when my progress changes', async () => {
+  it('a guest gets no progress or streak (zeros, so older apps still read it); it counts again once they sign up', async () => {
     const g = await guest(app);
+    await h().post('/v1/meditations', med(), { token: g.accessToken });
+    await drain();
+    const t = (await h().get('/v1/today', { token: g.accessToken })).body.data;
+    expect(t.streak).toBeNull();
+    expect(t.progress).toMatchObject({ minutesWeek: 0, meditationsWeek: 0 });
+    expect(t.progress.daysThisWeek.filter(Boolean)).toHaveLength(0);
+    const link = await h().post('/v1/auth/link/email', { email: 'later@x.test', password: 'Sup3r-secret-pw', firstName: 'Lu', username: 'lu.later' }, { token: g.accessToken });
+    const after = (await h().get('/v1/today', { token: link.body.data.accessToken })).body.data;
+    expect(after.progress).toMatchObject({ minutesWeek: 10, meditationsWeek: 1 }); // the guest's meditation is now theirs
+  });
+
+  it('ETag/304, and it changes when my progress changes', async () => {
+    const g = await account(app);
     const a = await h().get('/v1/today', { token: g.accessToken });
     const same = await h().get('/v1/today', { token: g.accessToken, headers: { 'if-none-match': a.headers.etag as string } });
     expect(same.status).toBe(304);

@@ -58,6 +58,15 @@ export async function guest(app: NestFastifyApplication, installId = `inst-${Mat
   return { ...r.body.data as { accessToken: string; refreshToken: string; me: { id: string; isGuest: boolean } }, installId };
 }
 
+/** A guest who signed up with e-mail: same user id, an account token (progress, profile and the like need one). */
+export async function account(app: NestFastifyApplication, installId?: string) {
+  const g = await guest(app, installId);
+  const tag = Math.random().toString(36).slice(2, 10);
+  const r = await http(app).post('/v1/auth/link/email', { email: `acct-${tag}@x.test`, password: 'Sup3r-secret-pw', firstName: 'Ana', username: `acct.${tag}` }, { token: g.accessToken });
+  if (r.status !== 200) throw new Error(`account failed ${r.status} ${JSON.stringify(r.body)}`);
+  return { ...g, accessToken: r.body.data.accessToken as string, refreshToken: r.body.data.refreshToken as string, me: { ...g.me, isGuest: false } };
+}
+
 // ───────────── admin helpers (P3) ─────────────
 import argon2 from 'argon2';
 import { generateSecret, generateSync } from 'otplib';
