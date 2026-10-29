@@ -9,6 +9,7 @@ import { EventRouter } from './event.router';
 import { GroupStartService } from './group-start.service';
 import { LiveGateway } from './live.gateway';
 import { LobbyService } from './lobby.service';
+import { OnlineService } from './online.service';
 import { OutboxRelay } from './outbox.relay';
 import { PresenceService } from './presence.service';
 import { RealtimeTicker } from './ticker';
@@ -16,8 +17,8 @@ import { RealtimeTicker } from './ticker';
 /** The pieces any process can use: presence, lobby, live numbers, group timing, the leader's ticker. No sockets here. */
 @Module({
   imports: [AuthModule, ContentModule, JobsModule],
-  providers: [PresenceService, LobbyService, LiveService, GroupService, GroupStartService, RealtimeTicker],
-  exports: [PresenceService, LobbyService, LiveService, GroupService, GroupStartService, RealtimeTicker],
+  providers: [PresenceService, OnlineService, LobbyService, LiveService, GroupService, GroupStartService, RealtimeTicker],
+  exports: [PresenceService, OnlineService, LobbyService, LiveService, GroupService, GroupStartService, RealtimeTicker],
 })
 export class RealtimeCoreModule {}
 

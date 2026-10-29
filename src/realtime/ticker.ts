@@ -14,6 +14,7 @@ import { addDaysIso } from '../modules/motd/motd.service';
 import { GroupStartService } from './group-start.service';
 import { LobbyService } from './lobby.service';
 import { GroupService } from '../modules/today/group.service';
+import { OnlineService } from './online.service';
 import { PresenceService } from './presence.service';
 import { metrics } from '../infra/metrics';
 import { vibration } from './vibration';
@@ -42,6 +43,7 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly bus: RealtimeBus, private readonly presence: PresenceService,
     private readonly live: LiveService, private readonly lobby: LobbyService, private readonly groupStart: GroupStartService, private readonly scheduler: SchedulerService, private readonly group: GroupService,
+    private readonly online: OnlineService,
   ) {}
 
   onModuleInit() { if (env.APP_ROLE === 'scheduler') this.start(); }
@@ -59,6 +61,7 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
   async presenceTick(now = Date.now()) {
     const started = Date.now();
     await this.presence.sweep(now);
+    await this.onlineSweep(now).catch((e) => this.log.warn(`online sweep failed: ${(e as Error).message}`));
     const snap = await this.live.snapshot(utcDay(now));
     metrics.presenceLive.set(snap.total ?? 0);
     metrics.presenceTickLag.set(Date.now() - started);
@@ -93,6 +96,15 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
     return { liveAgg: published, sessions: events.length };
   }
 
+  /** Apps that vanished without closing their socket (a pod died): offline for the CMS, last active = their last touch. */
+  async onlineSweep(now = Date.now()) {
+    const gone = await this.online.sweep(now);
+    if (!gone.length) return 0;
+    await this.bus.publishMany(gone.map((g) => ({ topic: 'users:presence', payload: { id: g.id, online: false, at: now, lastActiveAt: new Date(g.lastSeen).toISOString() } })));
+    await this.db.execute(sql`UPDATE users u SET last_active_at = g.seen FROM (SELECT unnest(${`{${gone.map((g) => g.id).join(',')}}`}::uuid[]) AS id, unnest(${`{${gone.map((g) => new Date(g.lastSeen).toISOString()).join(',')}}`}::timestamptz[]) AS seen) g WHERE u.id = g.id AND u.last_active_at < g.seen`);
+    return gone.length;
+  }
+
   async lobbyTick(now = Date.now()) {
     let published = 0;
     for (const date of await this.group.slots(now)) {
@@ -116,19 +128,21 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
   // ── dashboard
   async kpis(now = Date.now()) {
     const date = utcDay(now);
-    const [snap, meds, mins, subs, founding, flagged, silence, runs] = await Promise.all([
+    const [snap, meds, mins, subs, founding, flagged, silence, runs, online] = await Promise.all([
       this.live.snapshot(date), this.redis.get(K.medsToday(date)), this.redis.get(K.minsToday(date)),
       this.subscriptionCounts(),
       this.db.select().from(offers).where(eq(offers.id, 'founding')).then((r) => r[0]),
       this.db.select({ n: sql<number>`count(*)::int` }).from(dedications).where(NEEDS_REVIEW).then((r) => r[0]?.n ?? 0),
       this.live.silence(now).catch(() => null),
       this.sevenDayRuns(),
+      this.online.counts(now).catch(() => null),
     ]);
     return {
       liveNow: snap.total ?? 0, meditationsToday: Number(meds) || 0, minutesToday: Number(mins) || 0,
       payingMembers: subs.paying, inTrial: subs.trial, mrrUsd: subs.mrrUsd,
       founding: { taken: founding?.taken ?? 0, cap: founding?.cap ?? 0, open: !!founding?.open && (founding.taken < founding.cap) },
-      moderationOpen: flagged, silenceNow: silence?.people ?? 0, silenceCountries: silence?.top ?? [], streaks7: runs, at: now,
+      moderationOpen: flagged, silenceNow: silence?.people ?? 0, silenceCountries: silence?.top ?? [], streaks7: runs,
+      onlineNow: online?.total ?? 0, onlineGuests: online?.guests ?? 0, onlineCountries: online?.countries ?? [], at: now,
     };
   }
 

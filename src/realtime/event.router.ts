@@ -87,6 +87,7 @@ export class EventRouter implements OnModuleInit {
       case 'moderation:count': admin.to('role:owner').to('role:admin').to('role:moderator').emit('moderation:count', p); break;
       case 'subs:event': admin.to('subscriptions').emit('subs:event', p); break;
       case 'users:new': admin.to('users').emit('users:new', p); break;
+      case 'users:presence': admin.to('users').emit('users:presence', p); break;
       case 'notification:stats': admin.to('entities').emit('notification:stats', p); break;
       default: this.log.debug(`no route for ${topic}`);
     }

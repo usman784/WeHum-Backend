@@ -8,6 +8,7 @@ import { AppError } from '../../common/errors';
 import { Zod } from '../../common/zod';
 import { users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
+import { OnlineService } from '../../realtime/online.service';
 import { S3Service } from '../../infra/s3';
 import { AuthService } from '../auth/auth.service';
 import { UsernameService, validateUsername } from './username.service';
@@ -44,7 +45,7 @@ const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' } as
 @ApiBearerAuth()
 @Controller('v1/me')
 export class MeController {
-  constructor(private readonly auth: AuthService, private readonly usernames: UsernameService, private readonly s3: S3Service, @Inject(DRIZZLE) private readonly db: DB) {}
+  constructor(private readonly auth: AuthService, private readonly usernames: UsernameService, private readonly s3: S3Service, @Inject(DRIZZLE) private readonly db: DB, private readonly online: OnlineService) {}
 
   @Get()
   me(@CurrentUser() u: AppUser) { return this.auth.me(u.id); }
@@ -74,7 +75,11 @@ export class MeController {
         throw e;
       }
     }
-    return this.auth.me(u.id);
+    const me = await this.auth.me(u.id);
+    // hiding (or changing) the country takes the user off that country on the CMS map at once
+    if (b.showCountry !== undefined || b.country !== undefined)
+      await this.online.setMeta({ id: u.id, isGuest: me.isGuest, country: me.showCountry ? me.country : null }).catch(() => null);
+    return me;
   }
 
   /** Live check while typing: is this name free and allowed? Always returns a few alternatives. */

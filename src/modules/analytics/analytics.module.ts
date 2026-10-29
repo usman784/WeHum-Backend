@@ -9,12 +9,13 @@ import { ContentModule } from '../catalog/content.module';
 import { AnalyticsAdminController, AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 import { DashboardService } from './dashboard.service';
+import { OnlineService } from '../../realtime/online.service';
 
 /** P9: product events, daily rollups, the dashboard and analytics screens. */
 @Module({
   imports: [AuthModule, AdminModule, CommunityModule, PushModule, SubscriptionsModule, ContentModule],
   controllers: [AnalyticsController, AnalyticsAdminController],
-  providers: [AnalyticsService, DashboardService, GroupService],
+  providers: [AnalyticsService, DashboardService, GroupService, OnlineService],
   exports: [AnalyticsService],
 })
 export class AnalyticsModule {}

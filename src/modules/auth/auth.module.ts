@@ -15,10 +15,12 @@ import { CdnSigner } from '../../infra/cdn';
 import { S3Service } from '../../infra/s3';
 import { UsernameService } from '../me/username.service';
 
+import { OnlineService } from '../../realtime/online.service';
+
 @Module({
   controllers: [AuthController, MeController, TimeController],
   providers: [
-    TokensService, SocialVerifier, AuthService, UsernameService, CdnSigner, S3Service, Mailer, ConfigService, EntitlementService, AttestationService,
+    TokensService, SocialVerifier, AuthService, UsernameService, CdnSigner, S3Service, Mailer, ConfigService, EntitlementService, AttestationService, OnlineService,
     // order matters: who are you → how often → is this app version allowed
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: AccessGuard },

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import type { Namespace, Socket } from 'socket.io';
 import { z } from 'zod';
@@ -8,6 +8,7 @@ import { compareVersions } from '../common/auth';
 import { AppError } from '../common/errors';
 import { users } from '../db/schema';
 import { DRIZZLE, type DB } from '../infra/core.module';
+import { RealtimeBus } from '../infra/realtime-bus';
 import { REDIS } from '../infra/redis';
 import { AuthService } from '../modules/auth/auth.service';
 import { TokensService, type AppClaims } from '../modules/auth/tokens.service';
@@ -17,6 +18,7 @@ import { LiveService, silenceLive } from '../modules/live/live.service';
 import { MotdService, addDaysIso, utcToday } from '../modules/motd/motd.service';
 import { GroupService, isGlobalSlot, slotDate } from '../modules/today/group.service';
 import { LobbyService } from './lobby.service';
+import { ONLINE_TOUCH_MS, OnlineService } from './online.service';
 import { PresenceService } from './presence.service';
 import { connectError, fail, limitEvents, ok, safely, watchExpiry } from './socket-util';
 import { metrics } from '../infra/metrics';
@@ -52,17 +54,21 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @WebSocketServer() server!: Namespace;
   private readonly log = new Logger('LiveGateway');
   private lobbyTimer?: NodeJS.Timeout;
+  /** This pod's sockets per user (online state itself is kept across pods in Redis). */
+  private readonly local = new Map<string, { sockets: Set<string>; user: LiveSocketData['user'] }>();
+  private touching = false;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly tokens: TokensService, private readonly config: ConfigService,
     private readonly presence: PresenceService, private readonly lobby: LobbyService, private readonly live: LiveService, private readonly entitlements: EntitlementService,
     private readonly motd: MotdService, private readonly group: GroupService, private readonly auth: AuthService,
+    private readonly online: OnlineService, private readonly bus: RealtimeBus,
   ) {}
 
   afterInit(nsp: Namespace) {
     nsp.use((socket, next) => void this.authenticate(socket as LiveSocket).then(() => next(), (e) => next(e)));
-    // lobby members stay "fresh" while their socket is connected to this pod
-    this.lobbyTimer = setInterval(() => void this.touchLobbies(), 30_000);
+    // lobby members and online users stay "fresh" while their socket is connected to this pod
+    this.lobbyTimer = setInterval(() => { void this.touchLobbies(); void this.touchOnline(); }, ONLINE_TOUCH_MS);
     this.lobbyTimer.unref();
   }
 
@@ -90,13 +96,63 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     void socket.join([`user:${socket.data.user.id}`, 'config']);
     limitEvents(socket);
     socket.data.clear = watchExpiry(socket, socket.data.exp);
+    const u = socket.data.user;
+    const mine = this.local.get(u.id) ?? this.local.set(u.id, { sockets: new Set(), user: u }).get(u.id)!;
+    mine.sockets.add(socket.id);
+    void this.cameOnline(u, [socket.id]);
   }
 
   async handleDisconnect(socket: LiveSocket) {
     metrics.socketConnections.dec({ ns: 'live' });
     socket.data?.clear?.();
+    const u = socket.data?.user;
+    const mine = u && this.local.get(u.id);
+    if (mine) {
+      mine.sockets.delete(socket.id);
+      if (!mine.sockets.size) this.local.delete(u.id);
+      await this.wentOffline(u.id, socket.id);
+    }
     // presence is kept for 90 s (a backgrounded app may come back); the lobby is left at once
     for (const d of socket.data?.lobbies ?? []) await this.lobby.leave(d, socket.data.user.id).catch(() => null);
+  }
+
+  // ───────────── online (CMS: green dot, "Online now", the map)
+  private async cameOnline(u: LiveSocketData['user'], socketIds: string[]) {
+    try {
+      if (await this.online.touch(u, socketIds)) await this.bus.publish('users:presence', { id: u.id, online: true, at: Date.now() });
+    } catch (e) { this.log.warn(`online touch failed: ${(e as Error).message}`); }
+  }
+
+  /** A socket closed: offline only if it was the user's last one on any pod (decided atomically in Redis). */
+  private async wentOffline(userId: string, socketId: string) {
+    const now = new Date();
+    try {
+      if (!(await this.online.leave(userId, socketId))) return;
+      await this.bus.publish('users:presence', { id: userId, online: false, at: now.getTime(), lastActiveAt: now.toISOString() });
+    } catch (e) { this.log.warn(`online leave failed: ${(e as Error).message}`); return; }
+    await this.db.update(users).set({ lastActiveAt: now }).where(eq(users.id, userId)).catch((e) => this.log.warn(`last active not saved: ${(e as Error).message}`));
+  }
+
+  /**
+   * Every 30 s: keep this pod's users fresh in Redis, with their current guest/country flags (a guest who signed up, or
+   * someone who hid their country, is right on the map within one cycle). Batches of 500, never two cycles at once.
+   */
+  private async touchOnline() {
+    if (this.touching) return;
+    this.touching = true;
+    try {
+      const all = [...this.local.values()];
+      for (let i = 0; i < all.length; i += 500) {
+        const batch = all.slice(i, i + 500);
+        const rows = await this.db.select({ id: users.id, isGuest: users.isGuest, country: users.country, showCountry: users.showCountry }).from(users)
+          .where(inArray(users.id, batch.map((b) => b.user.id))).catch(() => []);
+        const fresh = new Map(rows.map((r) => [r.id, { id: r.id, isGuest: r.isGuest, country: r.showCountry ? r.country : null }]));
+        await Promise.all(batch.map((b) => {
+          b.user = fresh.get(b.user.id) ?? b.user;
+          return this.cameOnline(b.user, [...b.sockets]);
+        }));
+      }
+    } finally { this.touching = false; }
   }
 
   private async touchLobbies() {

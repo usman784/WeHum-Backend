@@ -7,6 +7,7 @@ import { CommunityService } from '../community/community.service';
 import { GroupService } from '../today/group.service';
 import { SubscriptionsAdminService } from '../subscriptions/subscriptions.admin';
 import { AnalyticsService, addDay, utcDay } from './analytics.service';
+import { OnlineService } from '../../realtime/online.service';
 
 /** The Dashboard (screen 01): numbers that are live, the week's messages, top meditations and what needs attention. */
 @Injectable()
@@ -14,6 +15,7 @@ export class DashboardService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly analytics: AnalyticsService,
     private readonly subs: SubscriptionsAdminService, private readonly community: CommunityService, private readonly group: GroupService,
+    private readonly online: OnlineService,
   ) {}
 
   /** Moderators see only the moderation slice. */
@@ -26,15 +28,17 @@ export class DashboardService {
     const monday = addDay(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
     const week = Array.from({ length: 7 }, (_, i) => addDay(monday, i));
     const [agg, medsToday, medsLastWeek, summary, lib, messages, top, motd, nextGroup, extras] = await Promise.all([
-      this.redis.get(K.liveAggLast).then((v) => (v ? (JSON.parse(v) as { total?: number; countries?: number }) : null)),
+      this.redis.get(K.liveAggLast).then((v) => (v ? (JSON.parse(v) as { total?: number; countries?: number; top?: { c: string; n: number }[] }) : null)),
       this.analytics.medsOn(today), this.analytics.medsOn(addDay(today, -7)), this.subs.summary(),
       this.db.execute<{ sessions: number; programs: number; themes: number }>(sql`SELECT (SELECT count(*) FROM sessions WHERE status='live')::int AS sessions, (SELECT count(*) FROM programs WHERE status='live')::int AS programs, (SELECT count(*) FROM themes WHERE visible)::int AS themes`).then((r) => r.rows[0]!),
       this.db.execute<{ date: string; title: string; type: string; status: string }>(sql`SELECT date::text, title, type::text, status::text FROM daily_messages WHERE date >= ${monday}::date AND date <= ${week[6]}::date ORDER BY date`).then((r) => r.rows),
       this.analytics.topSessions(7, 5),
       this.db.execute<{ date: string; title: string; lengths: number[] }>(sql`SELECT d.date::text, s.title, coalesce((SELECT array_agg(v.length_min ORDER BY v.length_min) FROM motd_variants v JOIN media_assets a ON a.id = v.media_id AND a.status = 'ready' WHERE v.date = d.date), '{}') AS lengths FROM motd_days d JOIN sessions s ON s.id = d.session_id WHERE d.date >= ${today}::date AND d.date <= ${addDay(today, 7)}::date ORDER BY d.date`).then((r) => r.rows),
       this.group.next(now),
-      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; silenceCountries?: { c: string; n: number }[]; streaks7?: number }) : null)).catch(() => null),
+      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; silenceCountries?: { c: string; n: number }[]; streaks7?: number; onlineNow?: number; onlineGuests?: number; onlineCountries?: { c: string; n: number }[] }) : null)).catch(() => null),
     ]);
+    // the leader counts who is online every 5 s; count here only when it has not yet (fresh start, tests)
+    const online = extras?.onlineNow !== undefined ? { total: extras.onlineNow, guests: extras.onlineGuests ?? 0, countries: extras.onlineCountries ?? [] } : await this.online.counts(now).catch(() => null);
     const byDate = new Map(messages.map((m) => [m.date, m]));
     const attention: Record<string, unknown>[] = [];
     if (open) attention.push(reported);
@@ -50,6 +54,7 @@ export class DashboardService {
         meditationsDeltaPct: medsLastWeek ? Math.round(((medsToday - medsLastWeek) / medsLastWeek) * 1000) / 10 : null,
         payingMembers: summary.payingMembers.total, inTrial: summary.inTrial, mrrUsd: summary.mrrUsd, library: lib,
         silenceNow: extras?.silenceNow ?? 0, silenceCountries: extras?.silenceCountries ?? [], streaks7: extras?.streaks7 ?? 0,
+        liveTop: agg?.top ?? [], onlineNow: online?.total ?? 0, onlineGuests: online?.guests ?? 0, onlineCountries: online?.countries ?? [],
       },
       moderationOpen: open,
       dailyMessages: week.map((d) => ({ date: d, title: byDate.get(d)?.title ?? null, type: byDate.get(d)?.type ?? null, status: byDate.get(d)?.status ?? 'missing' })),

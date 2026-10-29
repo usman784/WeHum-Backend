@@ -44,4 +44,7 @@ export const K = {
   countersPlays: 'counters:plays',
   countersCompletions: 'counters:completions',
   leader: 'scheduler:leader',
+  onlineZ: 'on:z', // user → last touch (ms): who has the app open
+  onlineMeta: 'on:m', // user → "CC|g" or "CC|a" (country, guest or account)
+  onlineSockets: (userId: string) => `on:s:${userId}`, // socket id → last touch: the user's open apps on every pod
 } as const;

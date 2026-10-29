@@ -78,13 +78,16 @@ export interface AdminClientToServer {
 
 export interface AdminServerToClient {
   'entity:changed': (p: { type: EntityType; id: string; op: 'create' | 'update' | 'delete'; version: number; by: { id: string; name: string } | null }) => void;
-  'dashboard:kpis': (p: { liveNow: number; meditationsToday: number; minutesToday: number; payingMembers: number; inTrial: number; mrrUsd: number; founding: { taken: number; cap: number; open: boolean }; moderationOpen: number; silenceNow?: number; silenceCountries?: { c: string; n: number }[]; at: number }) => void;
+  'dashboard:kpis': (p: { liveNow: number; meditationsToday: number; minutesToday: number; payingMembers: number; inTrial: number; mrrUsd: number; founding: { taken: number; cap: number; open: boolean }; moderationOpen: number; silenceNow?: number; silenceCountries?: { c: string; n: number }[];
+    onlineNow?: number; onlineGuests?: number; onlineCountries?: { c: string; n: number }[]; at: number }) => void;
   'live:agg': (p: LiveAgg) => void;
   'moderation:new': (p: { dedication: unknown; flags: string[] }) => void;
   'moderation:count': (p: { open: number }) => void;
   'subs:event': (p: { event: unknown }) => void;
   'config:changed': (p: { key: string; version: number }) => void;
   'users:new': (p: { count: number }) => void;
+  /** A user opened or closed the app (room `users`). `lastActiveAt` comes with "offline". */
+  'users:presence': (p: { id: string; online: boolean; at: number; lastActiveAt?: string }) => void;
   'job:progress': (p: { id: string; type: string; status: string; progress: number; error?: string; result?: unknown }) => void;
   'editing:presence': (p: { type: EntityType; id: string; admins: { id: string; name: string }[] }) => void;
   'notification:stats': (p: { id: string; delivered: number; opened: number; failed: number }) => void;

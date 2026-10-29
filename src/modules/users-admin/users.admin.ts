@@ -15,12 +15,13 @@ import { users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { REDIS } from '../../infra/redis';
 import { QUEUES, QueueService } from '../../jobs/queues';
+import { OnlineService } from '../../realtime/online.service';
 import { CONTENT_ROLES, MANAGER_ROLES } from '../admin-auth/rbac';
 import { AdminWriter, CurrentActor, type Actor } from '../admin/admin-writer';
 import { cursorQuery, IdParam } from '../admin/dto';
 import { toCsv, UserDataService } from './user-data.service';
 
-const TABS = ['all', 'guests', 'free', 'trial', 'annual', 'monthly', 'cancelled'] as const;
+const TABS = ['all', 'online', 'guests', 'free', 'trial', 'annual', 'monthly', 'cancelled'] as const;
 const ListQuery = z.object({ tab: z.enum(TABS).default('all'), q: z.string().trim().max(80).optional(), ...cursorQuery });
 const DeleteDto = z.object({ confirm: z.string().min(1).max(254) }).strict();
 const Id = new Zod(IdParam);
@@ -29,7 +30,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const member = sql`(e.active and (e.expires_at is null or e.expires_at > now()))`;
 const monthly = sql`e.product_id ilike '%monthly%'`;
 const TAB_SQL: Record<(typeof TABS)[number], SQL> = {
-  all: sql`true`, guests: sql`u.is_guest`, free: sql`(not u.is_guest and not coalesce(${member}, false) and e.product_id is null)`, trial: sql`(${member} and e.period_type = 'trial')`,
+  all: sql`true`, online: sql`true`, /* narrowed to the online ids in list() */ guests: sql`u.is_guest`, free: sql`(not u.is_guest and not coalesce(${member}, false) and e.product_id is null)`, trial: sql`(${member} and e.period_type = 'trial')`,
   annual: sql`(${member} and e.period_type <> 'trial' and not ${monthly})`, monthly: sql`(${member} and e.period_type <> 'trial' and ${monthly})`,
   cancelled: sql`(e.product_id is not null and not e.will_renew and e.store <> 'promotional')`,
 };
@@ -53,7 +54,7 @@ const avatarOf = (v: string | null) => (v ? (/^https?:/.test(v) ? v : `${env.CDN
 
 @Injectable()
 export class UsersAdminService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly data: UserDataService, private readonly queues: QueueService, private readonly writer: AdminWriter) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly data: UserDataService, private readonly queues: QueueService, private readonly writer: AdminWriter, private readonly online: OnlineService) {}
 
   private searchSql(q?: string): SQL {
     if (!q) return sql`true`;
@@ -78,6 +79,10 @@ export class UsersAdminService {
     const conds: SQL[] = [sql`u.deleted_at is null`, TAB_SQL[q.tab], this.searchSql(q.q)];
     const c = decodeCursor(q.cursor);
     if (c) conds.push(sql`(u.last_active_at, u.id) < (${new Date(String(c.k))}, ${c.id}::uuid)`);
+    if (q.tab === 'online') {
+      const ids = await this.online.ids();
+      conds.push(ids.length ? sql`u.id = ANY(${`{${ids.join(',')}}`}::uuid[])` : sql`false`);
+    }
     const rows = (await this.db.execute<Record<string, any>>(sql`SELECT u.id, u.first_name, u.last_name, u.username, u.avatar_url, u.email, u.is_guest, u.country, u.created_at, u.last_active_at, u.muted_at,
         e.active, e.product_id, e.period_type::text AS period_type, e.started_at, e.expires_at, e.will_renew, e.is_founding, e.store::text AS store,
         coalesce(s.meditations_total, 0) AS meditations, coalesce((SELECT sum(minutes) FROM user_daily_stats d WHERE d.user_id = u.id AND d.local_date >= date_trunc('week', now())::date), 0)::int AS week_minutes,
@@ -85,12 +90,14 @@ export class UsersAdminService {
       FROM users u LEFT JOIN entitlements e ON e.user_id = u.id LEFT JOIN user_stats s ON s.user_id = u.id
       WHERE ${sql.join(conds, sql` AND `)} ORDER BY u.last_active_at DESC, u.id DESC LIMIT ${limit + 1}`)).rows; // eslint-disable-line @typescript-eslint/no-explicit-any
     const page = rows.slice(0, limit);
+    const online = await this.online.isOnline(page.map((r) => String(r.id))).catch(() => new Set<string>());
     const out = page.map((r) => ({
+      online: online.has(String(r.id)),
       id: r.id, name: r.first_name, lastName: r.last_name, username: r.username, avatarUrl: avatarOf(r.avatar_url), email: r.email, isGuest: r.is_guest, providers: r.providers, country: r.country, joinedAt: r.created_at, lastActiveAt: r.last_active_at, muted: !!r.muted_at,
       membership: membershipOf({ isGuest: r.is_guest }, r.product_id || r.active ? { active: r.active, productId: r.product_id, periodType: r.period_type, startedAt: r.started_at, expiresAt: r.expires_at, willRenew: r.will_renew, isFounding: r.is_founding, store: r.store } : null),
       weekMinutes: Number(r.week_minutes), meditations: Number(r.meditations),
     }));
-    return { data: out, meta: { nextCursor: rows.length > limit ? encodeCursor(new Date(page.at(-1)!.last_active_at).toISOString(), page.at(-1)!.id) : null, counts: await this.counts() } };
+    return { data: out, meta: { nextCursor: rows.length > limit ? encodeCursor(new Date(page.at(-1)!.last_active_at).toISOString(), page.at(-1)!.id) : null, counts: { ...(await this.counts()), online: await this.online.total().catch(() => 0) } } };
   }
 
   async detail(id: string) {
@@ -114,7 +121,9 @@ export class UsersAdminService {
     const hr = (await q(sql`SELECT count(*)::int AS n FROM meditations WHERE user_id = ${id} AND hr_delta_bpm IS NOT NULL`))[0]?.n ?? 0;
     const st = stats[0] ?? { minutes_total: 0, meditations_total: 0, group_total: 0 };
     const saved = firstIdentity[0]?.created_at ? new Date(firstIdentity[0].created_at) : null;
+    const online = await this.online.isOnline([String(u.id)]).catch(() => new Set<string>());
     return {
+      online: online.has(String(u.id)),
       id: u.id, name: u.first_name, lastName: u.last_name, bio: u.bio, username: u.username, avatarUrl: avatarOf(u.avatar_url), email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
       providers: [...new Set(ids.filter((i) => i.provider !== 'device').map((i) => i.provider))],
       streak: { current: streak.current, record: streak.record, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone }, heartRateReadings: hr,
