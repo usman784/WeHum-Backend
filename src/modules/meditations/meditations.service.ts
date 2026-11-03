@@ -8,6 +8,7 @@ import { clampLimit, decodeCursor, encodeCursor } from '../../common/pagination'
 import { meditations, sessionKudos, sessions, userDailyStats, users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { K, REDIS } from '../../infra/redis';
+import { RealtimeBus } from '../../infra/realtime-bus';
 import { QUEUES, QueueService } from '../../jobs/queues';
 import { ConfigService, type MainConfig } from '../config/config.service';
 import { ProgressService } from '../me/progress.service';
@@ -42,6 +43,7 @@ export class MeditationsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly queues: QueueService,
     private readonly live: LiveService, private readonly entitlements: EntitlementService, private readonly config: ConfigService, private readonly progress: ProgressService,
+    private readonly bus: RealtimeBus,
   ) {}
 
   /**
@@ -73,9 +75,26 @@ export class MeditationsService {
       if (out!.userId !== user.id) throw new AppError('ALREADY_EXISTS', 'This id is already used');
     } else {
       await this.afterInsert(user.id, date, counted, b.durationSec, u.country);
+      if (counted && b.completed && sess) await this.notifyPracticed(user.id, sess.id, b.startedAt);
       await this.queues.add(QUEUES.stats, 'meditation', { meditationId: b.id }, { jobId: `stats-${b.id}`, attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
     }
     return { created, result: await this.result(user, out!, u.isGuest) };
+  }
+
+  /** Tells every device of the person that a meditation is now "practiced" (library badge + filter update at once). Fails soft. */
+  private async notifyPracticed(userId: string, sessionId: string, at: string) {
+    try { await this.bus.publish('practiced:changed', { userId, sessionId, at }); } catch { /* the app also reloads the list when it reconnects */ }
+  }
+
+  /**
+   * Meditations the person has finished at least once (completed and counted), one row per meditation, free or premium alike.
+   * Drives the "Practiced" mark and the Library filter.
+   */
+  async practiced(userId: string) {
+    const rows = await this.db.select({ sessionId: meditations.sessionId, n: sql<number>`count(*)::int`, last: sql<Date>`max(${meditations.startedAt})` }).from(meditations)
+      .where(and(eq(meditations.userId, userId), eq(meditations.completed, true), eq(meditations.counted, true), sql`${meditations.sessionId} is not null`))
+      .groupBy(meditations.sessionId);
+    return { items: rows.map((r) => ({ sessionId: r.sessionId!, count: r.n, lastAt: new Date(r.last).toISOString() })) };
   }
 
   /** Redis hot counters used by the live line and the MOTD card; both fail soft. */

@@ -71,6 +71,7 @@ export class EventRouter implements OnModuleInit {
       // ── per user / per admin
       case 'entitlement:changed': live.to(`user:${p.userId}`).emit('entitlement:changed', { ...p.entitlement, userId: p.userId }); break; // userId lets a client drop an event meant for the account it just left
       case 'account:changed': live.to(`user:${p.userId}`).emit('account:changed', { reason: p.reason }); break;
+      case 'practiced:changed': live.to(`user:${p.userId}`).emit('practiced:changed', { sessionId: p.sessionId, at: p.at }); break;
       case 'inbox:new': live.to(`user:${p.userId}`).emit('inbox:new', { item: p.item }); break;
       case 'force:logout': {
         const [nsp, room] = p.scope === 'admin' ? [admin, `admin:${p.id}`] : [live, `user:${p.id}`];

@@ -59,6 +59,8 @@ export interface LiveServerToClient {
   'entitlement:changed': (p: { active: boolean; productId: string | null; periodType: string | null; expiresAt: string | null; billingIssue: boolean; source?: string; betaExpiresAt?: string | null; rev?: number; willRenew?: boolean; isFounding?: boolean; userId?: string }) => void;
   /** Something about the account was changed from the CMS (reason `sample_reset` | `progress_reset`): refetch the profile and progress. */
   'account:changed': (p: { reason: string }) => void;
+  /** The person finished a meditation (any device): mark it practiced. */
+  'practiced:changed': (p: { sessionId: string; at: string }) => void;
   'inbox:new': (p: { item: unknown }) => void;
   'config:changed': (p: { key: string; version: number }) => void;
   'catalog:changed': (p: { version: number }) => void;

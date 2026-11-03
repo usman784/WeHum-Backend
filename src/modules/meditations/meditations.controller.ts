@@ -25,6 +25,10 @@ export class MeditationsController {
   @RateLimit('batch', 20, 60) @HttpCode(200) @Post('meditations/batch')
   batch(@CurrentUser() u: AppUser, @Body(new Zod(BatchDto)) b: z.infer<typeof BatchDto>) { return this.meditations.batch(u, b.items); }
 
+  /** Sessions the person has finished (for the "Practiced" mark and filter). */
+  @Get('meditations/practiced')
+  practiced(@CurrentUser() u: AppUser) { return this.meditations.practiced(u.id); }
+
   @Get('meditations')
   history(@CurrentUser() u: AppUser, @Query(new Zod(HistoryQuery)) q: z.infer<typeof HistoryQuery>) { return this.meditations.history(u.id, q); }
 
