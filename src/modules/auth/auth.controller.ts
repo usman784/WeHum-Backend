@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { CurrentUser, OptionalAuth, Public, RateLimit, SkipVersionGate, type AppUser, type AuthedRequest } from '../../common/auth';
 import { AppError } from '../../common/errors';
+import { passwordPolicy } from '../../common/password-policy';
 import { Zod } from '../../common/zod';
 import { AttestationDto, AttestationService } from './attestation';
 import { AuthService, type DeviceInfo } from './auth.service';
@@ -23,14 +24,13 @@ const RefreshDto = z.object({ refreshToken: z.string().min(20) });
 const LogoutDto = z.object({ refreshToken: z.string().min(20).optional() });
 const SocialDto = z.object({ idToken: z.string().min(20), rawNonce: z.string().max(200).optional(), firstName: z.string().trim().max(30).optional() });
 const email = z.string().trim().toLowerCase().email().max(254);
-const password = z.string().min(8, 'At least 8 characters').max(128).refine((p) => !COMMON.has(p.toLowerCase()), 'This password is too common');
+const password = passwordPolicy;
 const EmailLoginDto = z.object({ email, password: z.string().min(1).max(128) });
 const EmailLinkDto = z.object({ email, password, firstName: z.string().trim().min(1).max(30).optional(), lastName: z.string().trim().min(1).max(30).optional(), username: z.string().trim().min(3).max(20).optional() });
 const EmailOnlyDto = z.object({ email });
 const TokenDto = z.object({ token: z.string().min(20) });
 const ResetDto = z.object({ token: z.string().min(20), password });
 const MergeDto = z.object({ mergeToken: z.string().min(20) });
-const COMMON = new Set(['password', 'password1', '12345678', '123456789', 'qwertyui', 'iloveyou', '11111111', 'meditation', 'wehum123']);
 
 const country = (req: AuthedRequest) => {
   const c = (req.headers['cf-ipcountry'] ?? req.headers['cloudfront-viewer-country'] ?? req.headers['x-country']) as string | undefined;

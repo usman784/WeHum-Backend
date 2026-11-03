@@ -55,18 +55,22 @@ export interface LiveServerToClient {
   'dedication:removed': (p: { id: string }) => void;
   'gratitude:new': (p: { kind: 'gratitude' | 'affirmation' | 'love'; item: unknown }) => void;   // room gratitude:{kind} (P11)
   'gratitude:removed': (p: { kind: 'gratitude' | 'affirmation' | 'love'; id: string }) => void;
-  'entitlement:changed': (p: { active: boolean; productId: string | null; periodType: string | null; expiresAt: string | null; billingIssue: boolean }) => void;
+  /** `rev` grows with every change of the account's access: a client drops an event older than the one it has. `source` is none | paid | beta | paid+beta. */
+  'entitlement:changed': (p: { active: boolean; productId: string | null; periodType: string | null; expiresAt: string | null; billingIssue: boolean; source?: string; betaExpiresAt?: string | null; rev?: number; willRenew?: boolean; isFounding?: boolean; userId?: string }) => void;
+  /** Something about the account was changed from the CMS (reason `sample_reset` | `progress_reset`): refetch the profile and progress. */
+  'account:changed': (p: { reason: string }) => void;
   'inbox:new': (p: { item: unknown }) => void;
   'config:changed': (p: { key: string; version: number }) => void;
   'catalog:changed': (p: { version: number }) => void;
   'auth:expiring': (p: { exp: number }) => void;
+  /** reason: signed_out | account_suspended | account_deleted | password_reset | access_changed */
   'force:logout': (p: { reason: string }) => void;
   error: (p: { code: string }) => void;   // RATE_LIMITED, TOKEN_EXPIRED
 }
 
 // ── /admin (CMS)
 export type EntityType = 'session' | 'media' | 'theme' | 'teacher' | 'program' | 'motd' | 'dailyMessage' | 'soundBlock' | 'sos'
-  | 'config' | 'notification' | 'challenge' | 'admin' | 'user' | 'dedication' | 'breathPattern' | 'gratitude';
+  | 'config' | 'notification' | 'challenge' | 'admin' | 'user' | 'dedication' | 'breathPattern' | 'gratitude' | 'betaBatch';
 
 export interface AdminClientToServer {
   subscribe: (p: { channels: string[] }, ack: (r: Ack<{ joined: string[] }>) => void) => void;

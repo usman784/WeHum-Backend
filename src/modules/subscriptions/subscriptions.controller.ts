@@ -9,7 +9,7 @@ import { env } from '../../config/env';
 import { subscriptionEvents } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { QUEUES, QueueService } from '../../jobs/queues';
-import { toEntitlement } from '../me/me.mapper';
+import { EntitlementService } from '../entitlements/entitlement.service';
 import { metrics } from '../../infra/metrics';
 import { RcProcessor } from './rc.processor';
 
@@ -43,10 +43,12 @@ export class RevenueCatWebhookController {
 /** The app asks for a re-read right after a purchase, in case the webhook is late. */
 @Controller('v1/me')
 export class EntitlementSyncController {
-  constructor(private readonly processor: RcProcessor) {}
+  constructor(private readonly processor: RcProcessor, private readonly ent: EntitlementService) {}
 
+  /** Re-reads RevenueCat, then answers with the merged paid + beta state (a beta-only member has nothing at RevenueCat to read). */
   @RateLimit('ent-sync', 6, 60) @HttpCode(200) @Post('entitlement/sync')
   async sync(@CurrentUser() u: AppUser) {
-    return toEntitlement(await this.processor.syncUser(u.id));
+    await this.processor.syncUser(u.id).catch((e) => { if (!(e instanceof AppError) || e.code !== 'DEPENDENCY_DOWN') throw e; });
+    return this.ent.view(u.id);
   }
 }

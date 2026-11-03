@@ -68,7 +68,7 @@ export class SubscriptionsAdminService {
   }
 
   private tabConds(tab: (typeof Tabs)[number]): SQL[] {
-    const conds: SQL[] = [sql`${entitlements.productId} is not null`];
+    const conds: SQL[] = [sql`${entitlements.productId} is not null`, sql`not exists (select 1 from users tu where tu.id = ${entitlements.userId} and tu.is_test_account)`];
     if (tab === 'trial') conds.push(live, eq(entitlements.periodType, 'trial'));
     if (tab === 'annual') conds.push(live, sql`${entitlements.periodType} <> 'trial'`, sql`not ${isMonthly}`);
     if (tab === 'monthly') conds.push(live, sql`${entitlements.periodType} <> 'trial'`, isMonthly);

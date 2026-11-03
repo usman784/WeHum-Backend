@@ -60,7 +60,7 @@ export class NewsletterService {
     const s = await this.settings();
     if (!s.enabled || !s.listId || !this.keyConfigured) return 0;
     const rows = await this.db.select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName }).from(users)
-      .where(and(isNull(users.newsletterSyncedAt), isNotNull(users.email), isNotNull(users.emailVerifiedAt), eq(users.isGuest, false), isNull(users.deletedAt), sql`${users.email} not like '%@demo.wehum'`)).limit(limit);
+      .where(and(isNull(users.newsletterSyncedAt), isNotNull(users.email), isNotNull(users.emailVerifiedAt), eq(users.isGuest, false), eq(users.isTestAccount, false), isNull(users.deletedAt), sql`${users.email} not like '%@demo.wehum'`)).limit(limit);
     let done = 0;
     for (const u of rows) {
       const r = await this.subscribe(s, { email: u.email!, firstName: u.firstName, lastName: u.lastName });
@@ -74,7 +74,7 @@ export class NewsletterService {
   async status() {
     const s = await this.settings();
     const [c] = (await this.db.execute(sql`SELECT count(*) FILTER (WHERE newsletter_synced_at IS NOT NULL AND newsletter_error IS NULL)::int AS synced,
-        count(*) FILTER (WHERE newsletter_synced_at IS NULL AND email IS NOT NULL AND email_verified_at IS NOT NULL AND NOT is_guest AND deleted_at IS NULL AND email NOT LIKE '%@demo.wehum')::int AS pending,
+        count(*) FILTER (WHERE newsletter_synced_at IS NULL AND email IS NOT NULL AND email_verified_at IS NOT NULL AND NOT is_guest AND NOT is_test_account AND deleted_at IS NULL AND email NOT LIKE '%@demo.wehum')::int AS pending,
         count(*) FILTER (WHERE newsletter_error IS NOT NULL)::int AS failed FROM users`)).rows as { synced: number; pending: number; failed: number }[];
     return { enabled: s.enabled, keyConfigured: this.keyConfigured, listId: s.listId || null, ...c! };
   }

@@ -70,7 +70,8 @@ export class AuthGuard implements CanActivate {
     if (!token) { if (isPublic || optional) return true; throw new AppError('AUTH_REQUIRED'); }
     try {
       const c = await this.tokens.verify<AppClaims>(token, 'wehum-app');
-      if ((await this.tokens.tokenVersion(c.sub)) !== c.ver) throw new AppError('TOKEN_INVALID');
+      const tv = await this.tokens.tokenVersion(c.sub);
+      if (tv < 0 || tv !== c.ver) throw new AppError('TOKEN_INVALID'); // -1 = suspended / deleting: no token can carry it
       req.user = { id: c.sub, isGuest: c.gst, premium: c.prm, installId: c.iid, country: c.cty };
     } catch (e) {
       if (optional) return true;

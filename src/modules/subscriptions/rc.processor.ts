@@ -3,7 +3,8 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import type Redis from 'ioredis';
 import { z } from 'zod';
 import { env } from '../../config/env';
-import { entitlements, offers, subscriptionEvents, users } from '../../db/schema';
+import { AppError } from '../../common/errors';
+import { deletedIdentities, entitlements, offers, subscriptionEvents, users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { RealtimeBus } from '../../infra/realtime-bus';
 import { REDIS } from '../../infra/redis';
@@ -49,6 +50,9 @@ export class RcProcessor {
   private async resolveUser(tx: Tx, e: RcEvent): Promise<string | null> {
     const ids = this.ids(e);
     if (!ids.length) return null;
+    // a deleted account (tombstone) is never recreated or re-granted by an old event
+    const gone = await tx.select({ id: deletedIdentities.userId }).from(deletedIdentities).where(inArray(deletedIdentities.userId, ids));
+    if (gone.length) return null;
     const found = await tx.select({ id: users.id }).from(users).where(inArray(users.id, ids));
     const first = ids.find((i) => found.some((f) => f.id === i)) ?? ids[0]!;
     if (!found.some((f) => f.id === first)) await tx.insert(users).values({ id: first, isGuest: true }).onConflictDoNothing();
@@ -134,16 +138,14 @@ export class RcProcessor {
   private async after(outcome: string, notify: { userId: string; ent: ReturnType<typeof toEntitlement> }[], summary: Record<string, unknown> | null, closeFounding: boolean) {
     if (outcome === 'duplicate') return;
     await this.redis.del('dash:subs', 'offer:founding').catch(() => 0);
-    for (const n of notify) {
-      await this.ent.invalidate(n.userId);
-      await this.bus.publish('entitlement:changed', { userId: n.userId, entitlement: { active: n.ent.active, productId: n.ent.productId, periodType: n.ent.periodType, expiresAt: n.ent.expiresAt, billingIssue: n.ent.billingIssue } });
-    }
+    for (const n of notify) await this.ent.publish(n.userId).catch((e) => this.log.warn(`publish ${n.userId}: ${(e as Error).message}`)); // paid + beta merged, with a new revision
     if (summary) await this.bus.publish('subs:event', { event: summary });
     if (closeFounding) await this.rc.switchOffering(env.REVENUECAT_REGULAR_OFFERING).catch((e) => this.log.error(`could not switch the offering: ${(e as Error).message}`));
   }
 
   /** Re-read one user from RevenueCat (sync button, reconcile job, transfers). Returns the stored entitlement. */
   async syncUser(userId: string) {
+    if ((await this.db.select({ id: deletedIdentities.userId }).from(deletedIdentities).where(eq(deletedIdentities.userId, userId))).length) throw new AppError('GONE', 'Account no longer exists');
     const sub = await this.rc.getSubscriber(userId);
     const now = new Date();
     const e = sub?.entitlement;
@@ -156,9 +158,8 @@ export class RcProcessor {
     };
     await this.db.insert(users).values({ id: userId, isGuest: true }).onConflictDoNothing();
     const [row] = await this.db.insert(entitlements).values({ userId, ...values }).onConflictDoUpdate({ target: entitlements.userId, set: values }).returning();
-    await this.ent.invalidate(userId);
     await this.redis.del('dash:subs').catch(() => 0);
-    await this.bus.publish('entitlement:changed', { userId, entitlement: { active: toEntitlement(row).active, productId: row!.productId, periodType: row!.periodType, expiresAt: row!.expiresAt?.toISOString() ?? null, billingIssue: row!.billingIssue } });
+    await this.ent.publish(userId);
     return row!;
   }
 

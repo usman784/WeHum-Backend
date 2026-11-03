@@ -44,7 +44,7 @@ const slot = z.string().regex(/^(G\d{4}-\d{2}-\d{2}|\d{4}-\d{2}-\d{2}(T([01]\d|2
 const LobbyRef = z.object({ date: slot }).strict();
 const Refresh = z.object({ token: z.string().min(20).max(4096) }).strict();
 
-interface LiveSocketData { user: { id: string; isGuest: boolean; country: string | null }; installId?: string; exp: number; rooms: Set<string>; lobbies: Set<string>; clear?: () => void }
+interface LiveSocketData { user: { id: string; isGuest: boolean; country: string | null }; installId?: string; ver: number; exp: number; rooms: Set<string>; lobbies: Set<string>; clear?: () => void }
 type LiveSocket = Socket & { data: LiveSocketData };
 
 /** `/live`: the mobile app (spec §7.2). Websocket only; the server keeps no per-socket state that a reconnect cannot rebuild. */
@@ -75,7 +75,8 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   // ───────────── connection ─────────────
   private async verifyUser(token: string): Promise<AppClaims & { exp: number }> {
     const c = await this.tokens.verify<AppClaims>(token, 'wehum-app').catch((e) => { throw connectError(e instanceof AppError ? e.code : 'TOKEN_INVALID'); });
-    if ((await this.tokens.tokenVersion(c.sub)) !== c.ver) throw connectError('TOKEN_INVALID');
+    const tv = await this.tokens.tokenVersion(c.sub);
+    if (tv < 0 || tv !== c.ver) throw connectError('TOKEN_INVALID');
     return c;
   }
 
@@ -86,15 +87,24 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const main = await this.config.value<MainConfig>('main');
     const min = a.platform === 'ios' || a.platform === 'android' ? main.minVersion[a.platform] : undefined;
     if (min && a.appVersion && compareVersions(a.appVersion, min) < 0) throw connectError('UPDATE_REQUIRED');
-    const [u] = await this.db.select({ isGuest: users.isGuest, country: users.country, showCountry: users.showCountry, deletedAt: users.deletedAt }).from(users).where(eq(users.id, c.sub));
-    if (!u || u.deletedAt) throw connectError('GONE');
-    socket.data = { user: { id: c.sub, isGuest: u.isGuest, country: u.showCountry ? u.country : null }, installId: a.installId, exp: c.exp, rooms: new Set(), lobbies: new Set() };
+    const [u] = await this.db.select({ isGuest: users.isGuest, country: users.country, showCountry: users.showCountry, deletedAt: users.deletedAt, deletingAt: users.deletingAt, suspendedAt: users.suspendedAt }).from(users).where(eq(users.id, c.sub));
+    if (!u || u.deletedAt || u.deletingAt) throw connectError('GONE');
+    if (u.suspendedAt) throw connectError('ACCOUNT_SUSPENDED');
+    socket.data = { user: { id: c.sub, isGuest: u.isGuest, country: u.showCountry ? u.country : null }, installId: a.installId, ver: c.ver, exp: c.exp, rooms: new Set(), lobbies: new Set() };
   }
 
   handleConnection(socket: LiveSocket) {
     metrics.socketConnections.inc({ ns: 'live' });
     void socket.join([`user:${socket.data.user.id}`, 'config']);
     limitEvents(socket);
+    // a socket that outlives its session (suspension, deletion, password reset) cannot act: the next event ends it
+    socket.use((_packet, next) => {
+      void this.tokens.tokenVersion(socket.data.user.id).then((v) => {
+        if (v === socket.data.ver) return next();
+        socket.emit('force:logout', { reason: v === -1 ? 'account_suspended' : 'signed_out' });
+        socket.disconnect(true);
+      }, () => next());
+    });
     socket.data.clear = watchExpiry(socket, socket.data.exp);
     const u = socket.data.user;
     const mine = this.local.get(u.id) ?? this.local.set(u.id, { sockets: new Set(), user: u }).get(u.id)!;

@@ -69,14 +69,14 @@ export class UsersAdminService {
     if (hit) return JSON.parse(hit) as Record<string, number>;
     const [r] = (await this.db.execute<Record<string, number>>(sql`SELECT count(*)::int AS "all", count(*) FILTER (WHERE u.is_guest)::int AS guests, count(*) FILTER (WHERE NOT u.is_guest)::int AS accounts,
         count(*) FILTER (WHERE ${member} AND e.period_type <> 'trial')::int AS paying, count(*) FILTER (WHERE ${member} AND e.period_type = 'trial')::int AS trial
-      FROM users u LEFT JOIN entitlements e ON e.user_id = u.id WHERE u.deleted_at IS NULL`)).rows;
+      FROM users u LEFT JOIN entitlements e ON e.user_id = u.id WHERE u.deleted_at IS NULL AND NOT u.is_test_account`)).rows;
     await this.redis.set('users:counts', JSON.stringify(r), 'EX', 30).catch(() => null);
     return r!;
   }
 
   async list(q: z.infer<typeof ListQuery>) {
     const limit = clampLimit(q.limit, 30);
-    const conds: SQL[] = [sql`u.deleted_at is null`, TAB_SQL[q.tab], this.searchSql(q.q)];
+    const conds: SQL[] = [sql`u.deleted_at is null`, sql`not u.is_test_account`, TAB_SQL[q.tab], this.searchSql(q.q)]; // test accounts live under Beta Testers
     const c = decodeCursor(q.cursor);
     if (c) conds.push(sql`(u.last_active_at, u.id) < (${new Date(String(c.k))}, ${c.id}::uuid)`);
     if (q.tab === 'online') {
@@ -141,7 +141,7 @@ export class UsersAdminService {
   /** CSV of everyone matching the filters (max 100,000 rows), for the Users screen's export. */
   async csv(q: { tab: (typeof TABS)[number]; q?: string }) {
     const rows = (await this.db.execute<Record<string, any>>(sql`SELECT u.id, u.first_name AS name, u.email, u.is_guest, u.country, u.created_at AS joined, u.last_active_at AS last_active, e.product_id AS plan, e.period_type::text AS period, e.will_renew
-      FROM users u LEFT JOIN entitlements e ON e.user_id = u.id WHERE u.deleted_at IS NULL AND ${TAB_SQL[q.tab]} AND ${this.searchSql(q.q)} ORDER BY u.created_at LIMIT 100000`)).rows; // eslint-disable-line @typescript-eslint/no-explicit-any
+      FROM users u LEFT JOIN entitlements e ON e.user_id = u.id WHERE u.deleted_at IS NULL AND NOT u.is_test_account AND ${TAB_SQL[q.tab]} AND ${this.searchSql(q.q)} ORDER BY u.created_at LIMIT 100000`)).rows; // eslint-disable-line @typescript-eslint/no-explicit-any
     return toCsv(rows);
   }
 
@@ -155,8 +155,9 @@ export class UsersAdminService {
 
   /** Needs the person's email (or the first 8 characters of the id for guests) typed in: nobody deletes the wrong account by accident. */
   async startDelete(actor: Actor, id: string, confirm: string) {
-    const [u] = await this.db.select({ id: users.id, email: users.email }).from(users).where(and(eq(users.id, id), sql`${users.deletedAt} is null`));
+    const [u] = await this.db.select({ id: users.id, email: users.email, test: users.isTestAccount }).from(users).where(and(eq(users.id, id), sql`${users.deletedAt} is null`));
     if (!u) throw new AppError('NOT_FOUND', 'User not found');
+    if (u.test) throw new AppError('INVALID_STATE', 'Test accounts are deleted from Beta Testers, where access is blocked before cleanup starts');
     const expected = (u.email ?? u.id.slice(0, 8)).toLowerCase();
     if (confirm.trim().toLowerCase() !== expected) throw new AppError('VALIDATION_FAILED', 'The confirmation does not match', { fields: [{ path: 'confirm', message: `Type ${u.email ? 'the email address' : 'the first 8 characters of the user id'} to confirm` }], expected: u.email ? 'email' : 'id8' });
     const jobId = await this.data.createJob('user_delete', id, actor.id);

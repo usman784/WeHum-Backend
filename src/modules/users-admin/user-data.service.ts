@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { AppError } from '../../common/errors';
-import { auditLog, dedications, jobs, outboxEvents, users } from '../../db/schema';
+import { auditLog, dedications, deletedIdentities, entitlements, jobs, outboxEvents, users } from '../../db/schema';
 import { NEEDS_REVIEW } from '../community/community.service';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { RealtimeBus } from '../../infra/realtime-bus';
@@ -12,7 +12,8 @@ import { PushTransport } from '../push/push.transport';
 import { Mailer } from '../../infra/mailer';
 import { zipStore } from '../../common/zip';
 
-const csvCell = (v: unknown) => { const s = v === null || v === undefined ? '' : v instanceof Date ? v.toISOString() : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const csvCell = (v: unknown) => { let s = v === null || v === undefined ? '' : v instanceof Date ? v.toISOString() : String(v); if (/^[=+\-@\t\r]/.test(s) && typeof v === 'string') s = `'${s}`; // a spreadsheet must not run a name as a formula
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 export const toCsv = (rows: Record<string, unknown>[]) => { const head = rows[0] ? Object.keys(rows[0]) : []; return [head.join(','), ...rows.map((r) => head.map((h) => csvCell(r[h])).join(','))].join('\n') + '\n'; };
 
 /** Export and delete of one person's data (spec §4.4). Both run as jobs so the CMS can show progress and retry. */
@@ -86,12 +87,14 @@ export class UserDataService {
   }
 
   /** Delete first at RevenueCat (if it fails, nothing else has changed and the job can be run again), then storage, then the database. */
-  async deleteUser(jobId: string, userId: string, adminId: string | null) {
+  async deleteUser(jobId: string, userId: string, adminId: string | null, opts: { rc?: 'always' | 'if_entitled' } = {}) {
     await this.progress(jobId, { status: 'running', progress: 10 });
     try {
-      const [u] = await this.db.select({ id: users.id }).from(users).where(eq(users.id, userId));
+      const [u] = await this.db.select({ id: users.id, login: users.username, test: users.isTestAccount }).from(users).where(eq(users.id, userId));
       if (!u) throw new AppError('NOT_FOUND', 'User not found');
-      await this.rc.deleteSubscriber(userId);
+      // test accounts that never had a purchase or gift have nothing at RevenueCat (and may run where it is not configured)
+      const billed = opts.rc !== 'if_entitled' || (await this.db.select({ id: entitlements.userId }).from(entitlements).where(eq(entitlements.userId, userId))).length > 0;
+      if (billed) await this.rc.deleteSubscriber(userId);
       // leave the FCM topic user_<id> while the tokens are still known (best effort)
       const tokens = (await this.db.execute<{ push_token: string }>(sql`SELECT push_token FROM devices WHERE user_id = ${userId} AND push_token IS NOT NULL`)).rows.map((r) => r.push_token);
       await this.push.unsubscribe(userId, tokens);
@@ -105,6 +108,8 @@ export class UserDataService {
         await tx.execute(sql`DELETE FROM analytics_events WHERE user_id = ${userId}`);
         await tx.execute(sql`DELETE FROM push_log WHERE user_id = ${userId}`);
         await tx.execute(sql`UPDATE subscription_events SET user_id = NULL WHERE user_id = ${userId}`);
+        // tombstone: a late RevenueCat event for this id must not recreate the account; a test login is never handed out again
+        await tx.insert(deletedIdentities).values({ userId, login: u.test ? u.login?.slice(0, 40) ?? null : null }).onConflictDoNothing();
         await tx.delete(users).where(eq(users.id, userId)); // everything else cascades
         // no personal data in the audit entry: ids and counts only
         await tx.insert(auditLog).values({ actorId: adminId, actorRole: adminId ? 'admin' : 'system', action: 'user.delete', targetType: 'user', targetId: userId, after: { exportsDeleted: keys.length, dedicationsRemoved: removed.rows.length, revenueCat: true }, requestId: jobId.slice(0, 40) });

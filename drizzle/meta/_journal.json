@@ -85,6 +85,13 @@
       "when": 1793181029008,
       "tag": "0011_username_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793696226137,
+      "tag": "0012_beta_testers",
+      "breakpoints": true
     }
   ]
 }

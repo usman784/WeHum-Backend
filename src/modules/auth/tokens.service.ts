@@ -90,17 +90,19 @@ export class TokensService {
   async tokenVersion(userId: string): Promise<number> {
     const v = await this.redis.get(K.tokenVersion(userId)).catch(() => null);
     if (v !== null) return Number(v);
-    const [u] = await this.db.select({ v: users.tokenVersion, del: users.deletedAt }).from(users).where(eq(users.id, userId));
-    const ver = !u || u.del ? -1 : u.v;
+    const [u] = await this.db.select({ v: users.tokenVersion, del: users.deletedAt, sus: users.suspendedAt, dele: users.deletingAt }).from(users).where(eq(users.id, userId));
+    // deleted, deleting or suspended: no token can match, whatever it was issued with
+    const ver = !u || u.del || u.dele || u.sus ? -1 : u.v;
     await this.redis.set(K.tokenVersion(userId), ver, 'EX', 3600).catch(() => null);
     return ver;
   }
 
-  async bumpTokenVersion(userId: string) {
+  /** Invalidates every access and refresh token of the user and tells connected apps why they are signed out. */
+  async bumpTokenVersion(userId: string, reason = 'signed_out') {
     const [u] = await this.db.update(users).set({ tokenVersion: sqlInc() }).where(eq(users.id, userId)).returning({ v: users.tokenVersion });
     await this.redis.del(K.tokenVersion(userId));
     await this.db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
-    await this.bus.publish('force:logout', { scope: 'user', id: userId, reason: 'signed_out' }).catch(() => null); // connected apps sign out at once
+    await this.bus.publish('force:logout', { scope: 'user', id: userId, reason }).catch(() => null); // connected apps sign out at once
     return u?.v ?? 0;
   }
 

@@ -7,6 +7,7 @@ import { GroupStartService } from '../realtime/group-start.service';
 import { CountersService } from '../modules/meditations/counters.service';
 import { StatsProcessor } from '../modules/meditations/stats.processor';
 import { AnalyticsService } from '../modules/analytics/analytics.service';
+import { BetaService } from '../modules/beta/beta.service';
 import { UserDataService } from '../modules/users-admin/user-data.service';
 import { PushService } from '../modules/push/push.service';
 import { RcProcessor } from '../modules/subscriptions/rc.processor';
@@ -40,6 +41,9 @@ export class WorkerRunner implements OnModuleInit, OnApplicationShutdown {
         if (job.name === 'data.lifecycle') return this.moduleRef.get(AnalyticsService, { strict: false }).lifecycle();
         if (job.name === 'user.export') return this.moduleRef.get(UserDataService, { strict: false }).exportUser(job.data.jobId, job.data.userId, job.data.emailTo ?? null);
         if (job.name === 'user.delete') return this.moduleRef.get(UserDataService, { strict: false }).deleteUser(job.data.jobId, job.data.userId, job.data.adminId ?? null);
+        if (job.name === 'beta.generate') return this.moduleRef.get(BetaService, { strict: false }).runGenerate(job.data.jobId, job.data.batchId);
+        if (job.name === 'beta.bulk') return this.moduleRef.get(BetaService, { strict: false }).runBulk(job.data.jobId);
+        if (job.name === 'beta.expire') return this.moduleRef.get(BetaService, { strict: false }).expireDue();
         if (job.name === 'push.minute') return this.moduleRef.get(PushService, { strict: false }).minute();
         if (job.name === 'newsletter.sync') return this.moduleRef.get(NewsletterService, { strict: false }).syncPending();
         if (job.name === 'push.trial') return this.moduleRef.get(PushService, { strict: false }).trialEnding();

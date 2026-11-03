@@ -30,7 +30,7 @@ export const blockKind = pgEnum('block_kind', ['opening', 'core', 'closing', 'so
 export const dedicationStatus = pgEnum('dedication_status', ['visible', 'hidden', 'flagged']);
 export const adminRole = pgEnum('admin_role', ['owner', 'admin', 'editor', 'moderator']);
 export const adminStatus = pgEnum('admin_status', ['invited', 'active', 'disabled']);
-export const jobType = pgEnum('job_type', ['media_probe', 'media_loudness', 'media_transcode', 'image_process', 'youtube_resolve', 'user_export', 'user_delete', 'push_send', 'rc_reconcile']);
+export const jobType = pgEnum('job_type', ['media_probe', 'media_loudness', 'media_transcode', 'image_process', 'youtube_resolve', 'user_export', 'user_delete', 'push_send', 'rc_reconcile', 'beta_generate', 'beta_bulk']);
 export const jobStatus = pgEnum('job_status', ['queued', 'running', 'done', 'failed', 'cancelled']);
 export const notificationStatus = pgEnum('notification_status', ['draft', 'scheduled', 'sending', 'sent', 'cancelled', 'failed']);
 export const gratitudeKind = pgEnum('gratitude_kind', ['gratitude', 'affirmation', 'love']);
@@ -69,6 +69,18 @@ export const users = pgTable('users', {
   /** Stitch: weekly sit goal (1–7 days) shown on the streak strip. */
   weeklyGoal: smallint('weekly_goal').notNull().default(5),
   mutedAt: ts('muted_at'),
+  /** Beta testers: set by the server when an admin generates or imports the account, never inferred from the e-mail or name. */
+  isTestAccount: boolean('is_test_account').notNull().default(false),
+  betaBatchId: uuid('beta_batch_id'),
+  createdByAdminId: uuid('created_by_admin_id'),
+  seedPreset: varchar('seed_preset', { length: 20 }),
+  /** Suspension (not community muting): login, refresh, API and sockets are refused while set. */
+  suspendedAt: ts('suspended_at'),
+  suspendedReason: varchar('suspended_reason', { length: 200 }),
+  /** Set the moment a deletion is accepted: access is blocked before the slow cleanup starts. */
+  deletingAt: ts('deleting_at'),
+  /** Monotonic revision stamped on every `entitlement:changed` event so clients can drop stale ones. */
+  accessRev: integer('access_rev').notNull().default(0),
   tokenVersion: integer('token_version').notNull().default(0),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -76,6 +88,7 @@ export const users = pgTable('users', {
   deletedAt: ts('deleted_at'),
 }, (t) => [
   index('users_guest_created_idx').on(t.isGuest, t.createdAt.desc()),
+  index('users_test_batch_idx').on(t.betaBatchId, t.username).where(sql`${t.isTestAccount}`),
   index('users_last_active_idx').on(t.lastActiveAt.desc()),
   index('users_reminder_idx').on(t.timezone, t.reminderTime),
   index('users_first_name_trgm').using('gin', sql`${t.firstName} gin_trgm_ops`),
@@ -745,3 +758,79 @@ export const userMilestones = pgTable('user_milestones', {
   key: varchar('key', { length: 40 }).notNull(),
   reachedAt: ts('reached_at').notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.userId, t.key] })]);
+
+// ───────────── Beta testers ─────────────
+/** A generated or imported group of test accounts ("Beta Round 1"). `grantExpiresAt` is fixed when the batch is created so retries never move it. */
+export const betaBatches = pgTable('beta_batches', {
+  id: uuid('id').primaryKey(),
+  name: varchar('name', { length: 80 }).notNull(),
+  prefix: varchar('prefix', { length: 16 }).notNull(),
+  emailDomain: varchar('email_domain', { length: 120 }).notNull(),
+  total: integer('total').notNull(),
+  premiumCount: integer('premium_count').notNull().default(0),
+  grantExpiresAt: ts('grant_expires_at'),
+  seedPreset: varchar('seed_preset', { length: 20 }).notNull().default('blank'),
+  source: varchar('source', { length: 10 }).notNull().default('generate'),
+  status: varchar('status', { length: 12 }).notNull().default('creating'),
+  jobId: uuid('job_id'),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => [index('beta_batches_created_idx').on(t.createdAt.desc())]);
+
+/** One row per planned account: the stable operation reference that makes generation idempotent, and the intended grant. */
+export const betaOps = pgTable('beta_ops', {
+  opRef: varchar('op_ref', { length: 120 }).primaryKey(),
+  batchId: uuid('batch_id').notNull().references(() => betaBatches.id, { onDelete: 'cascade' }),
+  login: varchar('login', { length: 40 }).notNull(),
+  email: citext('email').notNull(),
+  userId: uuid('user_id'),
+  intendedPremium: boolean('intended_premium').notNull().default(false),
+  /** Fixed when the plan is made (the batch's shared expiry, or the CSV row's own), so a retry never moves it. */
+  grantExpiresAt: ts('grant_expires_at'),
+  /** pending → created → ready, or failed with the step that broke. */
+  state: varchar('state', { length: 10 }).notNull().default('pending'),
+  error: varchar('error', { length: 300 }),
+  /** True while the password is still the generated one; cleared on any reset or change, so the credentials export never lists a stale pair. */
+  initialPasswordActive: boolean('initial_password_active').notNull().default(true),
+  displayName: varchar('display_name', { length: 30 }),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex('beta_ops_login_idx').on(t.login), index('beta_ops_batch_idx').on(t.batchId, t.state), index('beta_ops_user_idx').on(t.userId)]);
+
+/** Beta premium, kept apart from `entitlements` so removing it can never touch a paid or support-gift subscription. */
+export const betaGrants = pgTable('beta_grants', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: ts('expires_at').notNull(),
+  grantedBy: uuid('granted_by'),
+  revokedAt: ts('revoked_at'),
+  expiryNotifiedAt: ts('expiry_notified_at'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [index('beta_grants_expiry_idx').on(t.expiresAt)]);
+
+/** Deletion progress per account; survives the user row so a failed cleanup can resume from its step. */
+export const betaDeletions = pgTable('beta_deletions', {
+  userId: uuid('user_id').primaryKey(),
+  batchId: uuid('batch_id'),
+  jobId: uuid('job_id'),
+  step: varchar('step', { length: 12 }).notNull().default('blocked'),
+  error: varchar('error', { length: 300 }),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** Tombstone: a late webhook for this id must not recreate the user, and the login is never handed out again. */
+export const deletedIdentities = pgTable('deleted_identities', {
+  userId: uuid('user_id').primaryKey(),
+  login: varchar('login', { length: 40 }),
+  deletedAt: ts('deleted_at').notNull().defaultNow(),
+}, (t) => [index('deleted_identities_login_idx').on(t.login)]);
+
+/** Rows created by a sample-data preset, so "Reset sample data" removes only these. */
+export const seedFixtures = pgTable('seed_fixtures', {
+  id: uuid('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind: varchar('kind', { length: 20 }).notNull(),
+  refId: varchar('ref_id', { length: 80 }).notNull(),
+  createdAt: createdAt(),
+}, (t) => [index('seed_fixtures_user_idx').on(t.userId)]);

@@ -7,8 +7,8 @@ import { env } from '../../config/env';
 import { AppError } from '../../common/errors';
 import type { AppUser } from '../../common/auth';
 import {
-  authIdentities, dedicationHolds, dedications, devices, emailTokens, entitlements, meditations,
-  programProgress, recipes, userDailyStats, users, userStats,
+  authIdentities, betaOps, dedicationHolds, dedications, devices, emailTokens, entitlements, meditations,
+  programProgress, recipes, refreshTokens, userDailyStats, users, userStats,
 } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
 import { Mailer } from '../../infra/mailer';
@@ -18,6 +18,7 @@ import { PushTransport } from '../push/push.transport';
 import { SocialVerifier } from './social.verifier';
 import { UsernameService, validateUsername } from '../me/username.service';
 import { CdnSigner } from '../../infra/cdn';
+import { EntitlementService } from '../entitlements/entitlement.service';
 import { opaqueToken, sha256, TokensService } from './tokens.service';
 
 export interface DeviceInfo { installId: string; platform: 'ios' | 'android'; appVersion: string; osVersion?: string; model?: string }
@@ -40,18 +41,20 @@ export class AuthService {
     private readonly push: PushTransport,
     private readonly usernames: UsernameService,
     private readonly cdn: CdnSigner,
+    private readonly ent: EntitlementService,
   ) {}
 
   // ───────────── sessions ─────────────
 
   async me(userId: string) {
     const u = await this.db.query.users.findFirst({ where: eq(users.id, userId) });
-    if (!u || u.deletedAt) throw new AppError('GONE', 'Account no longer exists');
-    const [ids, ent] = await Promise.all([
+    if (!u || u.deletedAt || u.deletingAt) throw new AppError('GONE', 'Account no longer exists');
+    if (u.suspendedAt) throw new AppError('ACCOUNT_SUSPENDED', 'This account is suspended');
+    const [ids, { access, paid }] = await Promise.all([
       this.db.select({ provider: authIdentities.provider }).from(authIdentities).where(eq(authIdentities.userId, userId)),
-      this.db.query.entitlements.findFirst({ where: eq(entitlements.userId, userId) }),
+      this.ent.access(userId),
     ]);
-    return toMe(u, ids, ent, this.cdn.publicUrl(u.avatarUrl));
+    return toMe(u, ids, paid, this.cdn.publicUrl(u.avatarUrl), access);
   }
 
   /** Access + refresh for a user on a device. */
@@ -96,6 +99,9 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string) {
+    // a device that was offline when its account was suspended learns why, instead of a bare "invalid token"
+    const [owner] = await this.db.select({ id: refreshTokens.userId }).from(refreshTokens).where(eq(refreshTokens.tokenHash, sha256(refreshToken)));
+    if (owner) await this.assertUsable(owner.id);
     const r = await this.tokens.rotate(refreshToken);
     const me = await this.me(r.userId);
     const ver = await this.tokens.tokenVersion(r.userId);
@@ -112,6 +118,13 @@ export class AuthService {
       if (dev) await this.tokens.revokeDevice(user.id, dev.id);
       if (old?.token) await this.push.unsubscribe(user.id, [old.token]); // leave topic user_<id> on logout
     }
+  }
+
+  /** Suspended and deleting accounts cannot start a session by any route (password, social, magic link). */
+  private async assertUsable(userId: string) {
+    const [u] = await this.db.select({ s: users.suspendedAt, d: users.deletingAt }).from(users).where(eq(users.id, userId));
+    if (u?.d) throw new AppError('INVALID_CREDENTIALS', 'Email or password is wrong');
+    if (u?.s) throw new AppError('ACCOUNT_SUSPENDED', 'This account is suspended');
   }
 
   // ───────────── identities ─────────────
@@ -228,6 +241,7 @@ export class AuthService {
   }
 
   private async loginResult(userId: string, device: DeviceInfo | null, mergeToken: string | null) {
+    await this.assertUsable(userId); // before anything is touched: no device re-pointing, no last-active update
     const deviceId = device ? await this.upsertDevice(this.db, userId, device) : null;
     await this.db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.id, userId));
     return { ...(await this.session(userId, deviceId, device?.installId)), mergeToken };
@@ -312,6 +326,7 @@ export class AuthService {
     if (!ident) throw new AppError('TOKEN_INVALID');
     await this.db.update(authIdentities).set({ passwordHash: await argon2.hash(password, { type: argon2.argon2id }) })
       .where(and(eq(authIdentities.provider, 'email'), eq(authIdentities.providerUid, row.email)));
+    await this.db.update(betaOps).set({ initialPasswordActive: false }).where(eq(betaOps.userId, ident.userId)); // a test account's generated password is gone
     await this.tokens.bumpTokenVersion(ident.userId); // signs out every device
   }
 

@@ -39,9 +39,9 @@ export class AnalyticsService {
     const from = new Date(`${date}T00:00:00Z`), to = new Date(from.getTime() + DAY);
     const r = (q: ReturnType<typeof sql>) => this.db.execute<Record<string, string | number | null>>(q).then((x) => x.rows);
     const [[med], [active], [newUsers], [trials], [paid], [cancel], [revenue], countries, themes, [funnelRow]] = await Promise.all([
-      r(sql`SELECT count(*) FILTER (WHERE counted)::int AS meditations, coalesce(sum(duration_sec) FILTER (WHERE counted), 0)::int / 60 AS minutes, count(*) FILTER (WHERE counted AND kind = 'group')::int AS grp FROM meditations WHERE started_at >= ${from} AND started_at < ${to}`),
-      r(sql`SELECT count(DISTINCT uid)::int AS n FROM (SELECT user_id AS uid FROM meditations WHERE started_at >= ${from} AND started_at < ${to} UNION SELECT user_id FROM analytics_events WHERE name = 'app_open' AND at >= ${from} AND at < ${to} AND user_id IS NOT NULL) a`),
-      r(sql`SELECT count(*)::int AS n FROM users WHERE created_at >= ${from} AND created_at < ${to}`),
+      r(sql`SELECT count(*) FILTER (WHERE counted)::int AS meditations, coalesce(sum(duration_sec) FILTER (WHERE counted), 0)::int / 60 AS minutes, count(*) FILTER (WHERE counted AND kind = 'group')::int AS grp FROM meditations WHERE started_at >= ${from} AND started_at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account)`),
+      r(sql`SELECT count(DISTINCT uid)::int AS n FROM (SELECT user_id AS uid FROM meditations WHERE started_at >= ${from} AND started_at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account) UNION SELECT user_id FROM analytics_events WHERE name = 'app_open' AND at >= ${from} AND at < ${to} AND user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account)) a`),
+      r(sql`SELECT count(*)::int AS n FROM users WHERE created_at >= ${from} AND created_at < ${to} AND NOT is_test_account`),
       r(sql`SELECT count(*)::int AS n FROM subscription_events WHERE type = 'INITIAL_PURCHASE' AND period_type = 'trial' AND event_at >= ${from} AND event_at < ${to}`),
       r(sql`SELECT (
         (SELECT count(*) FROM subscription_events WHERE type = 'INITIAL_PURCHASE' AND period_type IN ('normal','intro') AND event_at >= ${from} AND event_at < ${to})
@@ -51,14 +51,14 @@ export class AnalyticsService {
         )::int AS n`),
       r(sql`SELECT count(*)::int AS n FROM subscription_events WHERE type = 'CANCELLATION' AND event_at >= ${from} AND event_at < ${to}`),
       r(sql`SELECT coalesce(sum(price_usd), 0)::text AS n FROM subscription_events WHERE type IN ('INITIAL_PURCHASE','RENEWAL','NON_RENEWING_PURCHASE') AND price_usd > 0 AND event_at >= ${from} AND event_at < ${to}`),
-      r(sql`SELECT coalesce(country, '??') AS k, count(DISTINCT user_id)::int AS n FROM meditations WHERE counted AND started_at >= ${from} AND started_at < ${to} GROUP BY 1`),
-      r(sql`SELECT t.name AS k, coalesce(sum(m.duration_sec), 0)::int / 60 AS n FROM meditations m JOIN sessions s ON s.id = m.session_id JOIN themes t ON t.id = s.theme_id WHERE m.counted AND m.started_at >= ${from} AND m.started_at < ${to} GROUP BY 1`),
+      r(sql`SELECT coalesce(country, '??') AS k, count(DISTINCT user_id)::int AS n FROM meditations WHERE counted AND started_at >= ${from} AND started_at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account) GROUP BY 1`),
+      r(sql`SELECT t.name AS k, coalesce(sum(m.duration_sec), 0)::int / 60 AS n FROM meditations m JOIN sessions s ON s.id = m.session_id JOIN themes t ON t.id = s.theme_id WHERE m.counted AND m.started_at >= ${from} AND m.started_at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = m.user_id AND tu.is_test_account) GROUP BY 1`),
       r(sql`SELECT
-        (SELECT count(*) FROM users WHERE created_at >= ${from} AND created_at < ${to})::int AS "installed",
-        (SELECT count(DISTINCT user_id) FROM analytics_events WHERE name = 'intro_done' AND at >= ${from} AND at < ${to})::int AS "introDone",
-        (SELECT count(*) FROM user_stats WHERE first_meditation_at >= ${from} AND first_meditation_at < ${to})::int AS "firstMeditation",
-        (SELECT count(DISTINCT user_id) FROM analytics_events WHERE name = 'continued_free' AND at >= ${from} AND at < ${to})::int AS "continuedFree",
-        (SELECT count(DISTINCT user_id) FROM analytics_events WHERE name = 'account_saved' AND at >= ${from} AND at < ${to})::int AS "savedAccount"`),
+        (SELECT count(*) FROM users WHERE created_at >= ${from} AND created_at < ${to} AND NOT is_test_account)::int AS "installed",
+        (SELECT count(DISTINCT user_id) FROM analytics_events WHERE name = 'intro_done' AND at >= ${from} AND at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account))::int AS "introDone",
+        (SELECT count(*) FROM user_stats WHERE first_meditation_at >= ${from} AND first_meditation_at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account))::int AS "firstMeditation",
+        (SELECT count(DISTINCT user_id) FROM analytics_events WHERE name = 'continued_free' AND at >= ${from} AND at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account))::int AS "continuedFree",
+        (SELECT count(DISTINCT user_id) FROM analytics_events WHERE name = 'account_saved' AND at >= ${from} AND at < ${to} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account))::int AS "savedAccount"`),
     ]);
     const peak = Math.max(Number(await this.redis.get(`live:peak:${date}`)) || 0, 0);
     const values = {
@@ -121,7 +121,7 @@ export class AnalyticsService {
 
   /** Distinct people over the whole period (a sum of daily numbers would count the same person many times). */
   private async distinctActive(from: string, to: string, pFrom: string, pTo: string) {
-    const q = (a: string, b: string) => this.db.execute<{ n: number }>(sql`SELECT count(DISTINCT user_id)::int AS n FROM meditations WHERE started_at >= ${new Date(`${a}T00:00:00Z`)} AND started_at < ${new Date(Date.parse(`${b}T00:00:00Z`) + DAY)}`).then((r) => r.rows[0]?.n ?? 0);
+    const q = (a: string, b: string) => this.db.execute<{ n: number }>(sql`SELECT count(DISTINCT user_id)::int AS n FROM meditations WHERE started_at >= ${new Date(`${a}T00:00:00Z`)} AND started_at < ${new Date(Date.parse(`${b}T00:00:00Z`) + DAY)} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = user_id AND tu.is_test_account)`).then((r) => r.rows[0]?.n ?? 0);
     const [cur, prev] = await Promise.all([q(from, to), q(pFrom, pTo)]);
     return { cur, prev };
   }
@@ -145,7 +145,7 @@ export class AnalyticsService {
       const [row] = (await this.db.execute<{ cohort: number; retained: number }>(sql`
         SELECT count(*)::int AS cohort,
                count(*) FILTER (WHERE EXISTS (SELECT 1 FROM meditations m WHERE m.user_id = u.id AND m.counted AND (m.started_at AT TIME ZONE 'UTC')::date = (u.created_at AT TIME ZONE 'UTC')::date + ${n}::int))::int AS retained
-        FROM users u WHERE (u.created_at AT TIME ZONE 'UTC')::date BETWEEN ${firstJoin}::date AND ${lastJoin}::date`)).rows;
+        FROM users u WHERE NOT u.is_test_account AND (u.created_at AT TIME ZONE 'UTC')::date BETWEEN ${firstJoin}::date AND ${lastJoin}::date`)).rows;
       out.push({ day: n, cohort: row?.cohort ?? 0, retained: row?.retained ?? 0, rate: row?.cohort ? row.retained / row.cohort : null });
     }
     const res = { retention: out, at: new Date(now).toISOString() };
@@ -166,7 +166,7 @@ export class AnalyticsService {
     const res = await this.db.execute<{ id: string; title: string; theme: string | null; plays: number; completion: number | null }>(sql`
       SELECT s.id, s.title, t.name AS theme, count(*)::int AS plays, avg(CASE WHEN m.completed THEN 1.0 ELSE 0.0 END)::float AS completion
       FROM meditations m JOIN sessions s ON s.id = m.session_id LEFT JOIN themes t ON t.id = s.theme_id
-      WHERE m.started_at >= ${since} GROUP BY s.id, s.title, t.name ORDER BY plays DESC LIMIT ${limit}`);
+      WHERE m.started_at >= ${since} AND NOT EXISTS (SELECT 1 FROM users tu WHERE tu.id = m.user_id AND tu.is_test_account) GROUP BY s.id, s.title, t.name ORDER BY plays DESC LIMIT ${limit}`);
     return res.rows;
   }
 

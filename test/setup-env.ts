@@ -25,3 +25,5 @@ process.env.FFPROBE_PATH = process.env.FFPROBE_PATH ?? require('@ffprobe-install
 process.env.REVENUECAT_WEBHOOK_SECRET = 'rc-test-secret';
 process.env.REVENUECAT_API_KEY_V2 = 'rc-test-key';
 process.env.REVENUECAT_PROJECT_ID = 'proj-test';
+// Beta testers: generated logins are aliases on this reserved fixture domain (never a real inbox).
+process.env.BETA_TEST_EMAIL_DOMAIN = 'testers.wehum.test';

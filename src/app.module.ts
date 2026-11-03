@@ -10,6 +10,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
 import { CommunityModule } from './modules/community/community.module';
 import { ComingSoonModule } from './modules/coming-soon/coming-soon.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { BetaModule } from './modules/beta/beta.module';
 import { UsersAdminModule } from './modules/users-admin/users-admin.module';
 import { FcmModule } from './modules/push/fcm.module';
 import { PushModule } from './modules/push/push.module';
@@ -20,8 +21,8 @@ import { ContentModule } from './modules/catalog/content.module';
 export class AppModule {
   static forRole(role: 'api' | 'worker' | 'scheduler'): DynamicModule {
     if (role === 'api') {
-      return { module: AppModule, imports: [CoreModule, FcmModule, AuthModule, ContentModule, AdminModule, ActivityModule, JobsModule, GatewaysModule, SubscriptionsModule, CommunityModule, ComingSoonModule, PushModule, AnalyticsModule, UsersAdminModule], controllers: [HealthController] };
+      return { module: AppModule, imports: [CoreModule, FcmModule, AuthModule, ContentModule, AdminModule, ActivityModule, JobsModule, GatewaysModule, SubscriptionsModule, CommunityModule, ComingSoonModule, PushModule, AnalyticsModule, UsersAdminModule, BetaModule], controllers: [HealthController] };
     }
-    return { module: AppModule, imports: [CoreModule, FcmModule, JobsModule, RealtimeCoreModule, PushModule, AnalyticsModule, UsersAdminModule] };
+    return { module: AppModule, imports: [CoreModule, FcmModule, JobsModule, RealtimeCoreModule, PushModule, AnalyticsModule, UsersAdminModule, BetaModule] };
   }
 }

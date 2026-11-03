@@ -47,6 +47,7 @@ export class SchedulerService implements OnModuleInit, OnApplicationShutdown {
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('newsletter.sync', { every: 60_000 }, { name: 'newsletter.sync', opts: { removeOnComplete: 50, removeOnFail: 200 } });
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('push.trial', { pattern: '0 9 * * *' }, { name: 'push.trial', opts: { removeOnComplete: 30, removeOnFail: 100 } });
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('rc.reconcile', { every: 86_400_000 }, { name: 'rc.reconcile', opts: { removeOnComplete: 30, removeOnFail: 100 } });
+    await this.queues.queue(QUEUES.cron).upsertJobScheduler('beta.expire', { every: 60_000 }, { name: 'beta.expire', opts: { removeOnComplete: 50, removeOnFail: 200 } });
     await this.queues.queue(QUEUES.cron).upsertJobScheduler('counters.flush', { every: 60_000 }, { name: 'counters.flush', opts: { removeOnComplete: 100, removeOnFail: 500 } });
   }
 

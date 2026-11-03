@@ -40,6 +40,11 @@ const schema = z.object({
   /** Offering the app gets once the Founding offer is closed. */
   REVENUECAT_REGULAR_OFFERING: z.string().default('regular'),
   REVENUECAT_BASE_URL: z.string().default('https://api.revenuecat.com'),
+  /** Beta testers: company-controlled domain for generated logins (beta001@<domain>). Generation is refused while empty. */
+  BETA_TEST_EMAIL_DOMAIN: z.string().default(''),
+  BETA_MAX_ACCOUNTS: z.coerce.number().int().min(1).max(1000).default(200),
+  /** Days after a batch is created during which its initial-credentials CSV can be exported. */
+  BETA_CREDENTIALS_EXPORT_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   ADMIN_APP_URL: z.string().default('http://localhost:5173'),
   /** Parent domain for the readable CSRF cookie when the CMS and API are on different subdomains, e.g. ".wehum.app". */
   ADMIN_COOKIE_DOMAIN: z.string().default(''),
