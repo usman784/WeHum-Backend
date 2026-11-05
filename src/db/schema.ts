@@ -491,6 +491,13 @@ export const savedMessages = pgTable('saved_messages', {
   createdAt: createdAt(),
 }, (t) => [primaryKey({ columns: [t.userId, t.date] })]);
 
+/** A member's favourite meditations (their "Favourites" list in You). One row per person and meditation. */
+export const favoriteSessions = pgTable('favorite_sessions', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.userId, t.sessionId] }), index('favorite_sessions_user_idx').on(t.userId, t.createdAt)]);
+
 export const reports = pgTable('reports', {
   id: uuid('id').primaryKey(),
   dedicationId: uuid('dedication_id').notNull().references(() => dedications.id, { onDelete: 'cascade' }),

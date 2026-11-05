@@ -8,12 +8,14 @@ import { MotdController } from '../motd/motd.controller';
 import { MotdService } from '../motd/motd.service';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
+import { FavoritesController } from './favorites.controller';
+import { FavoritesService } from './favorites.service';
 
 /** P2: catalog snapshot, details, search, SoS, MOTD, daily messages, signed play URLs. */
 @Module({
   imports: [AuthModule],
-  controllers: [CatalogController, MotdController, MediaController],
-  providers: [CdnSigner, CacheService, CatalogService, MotdService, MediaService],
+  controllers: [CatalogController, MotdController, MediaController, FavoritesController],
+  providers: [CdnSigner, CacheService, CatalogService, MotdService, MediaService, FavoritesService],
   exports: [CatalogService, MotdService, CdnSigner, CacheService],
 })
 export class ContentModule {}
