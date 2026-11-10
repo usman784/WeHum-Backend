@@ -1,5 +1,5 @@
 import { env } from '../../config/env';
-import { Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
@@ -24,6 +24,9 @@ import { toCsv, UserDataService } from './user-data.service';
 const TABS = ['all', 'online', 'guests', 'free', 'trial', 'annual', 'monthly', 'cancelled'] as const;
 const ListQuery = z.object({ tab: z.enum(TABS).default('all'), q: z.string().trim().max(80).optional(), ...cursorQuery });
 const DeleteDto = z.object({ confirm: z.string().min(1).max(254) }).strict();
+const text = (max: number) => z.string().trim().max(max).transform((v) => v || null);
+/** Manual profile fields an admin may set; an omitted key is left alone, an empty string clears it. */
+const EditDto = z.object({ firstName: text(30), lastName: text(30), contactEmail: z.string().trim().toLowerCase().max(254).email().or(z.literal('')).transform((v) => v || null), note: text(1000) }).partial().strict();
 const Id = new Zod(IdParam);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -124,7 +127,7 @@ export class UsersAdminService {
     const online = await this.online.isOnline([String(u.id)]).catch(() => new Set<string>());
     return {
       online: online.has(String(u.id)),
-      id: u.id, name: u.first_name, lastName: u.last_name, bio: u.bio, username: u.username, avatarUrl: avatarOf(u.avatar_url), email: u.email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
+      id: u.id, name: u.first_name, lastName: u.last_name, bio: u.bio, username: u.username, avatarUrl: avatarOf(u.avatar_url), email: u.email, note: u.admin_note, contactEmail: u.contact_email, isGuest: u.is_guest, country: u.country, timezone: u.timezone, joinedAt: u.created_at, lastActiveAt: u.last_active_at, muted: !!u.muted_at,
       providers: [...new Set(ids.filter((i) => i.provider !== 'device').map((i) => i.provider))],
       streak: { current: streak.current, record: streak.record, graceLeft: streak.graceLeft, weeklyGoal: streak.weeklyGoal, goalDaysDone: streak.goalDaysDone }, heartRateReadings: hr,
       accountSavedAt: saved, wasGuestDays: saved ? Math.max(0, Math.round((saved.getTime() - new Date(u.created_at).getTime()) / 86_400_000)) : null,
@@ -165,6 +168,23 @@ export class UsersAdminService {
     return { jobId };
   }
 
+  /** Admin sets name, contact e-mail and note by hand (beta testers). The contact e-mail is separate from the login e-mail, so it never blocks a real sign-up. */
+  async edit(actor: Actor, id: string, b: z.infer<typeof EditDto>) {
+    const [before] = await this.db.select({ firstName: users.firstName, lastName: users.lastName, contactEmail: users.contactEmail, note: users.adminNote }).from(users).where(and(eq(users.id, id), sql`${users.deletedAt} is null`));
+    if (!before) throw new AppError('NOT_FOUND', 'User not found');
+    const set: Partial<typeof users.$inferInsert> = {};
+    if (b.firstName !== undefined) set.firstName = b.firstName;
+    if (b.lastName !== undefined) set.lastName = b.lastName;
+    if (b.note !== undefined) set.adminNote = b.note;
+    if (b.contactEmail !== undefined) set.contactEmail = b.contactEmail;
+    if (!Object.keys(set).length) return { ok: true };
+    await this.writer.run(actor, { action: 'user.edit', type: 'user', id }, async (tx) => {
+      await tx.update(users).set(set).where(eq(users.id, id));
+      return { result: null, before, after: set };
+    });
+    return { ok: true };
+  }
+
   private async exists(id: string) {
     const [u] = await this.db.select({ id: users.id }).from(users).where(eq(users.id, id));
     if (!u) throw new AppError('NOT_FOUND', 'User not found');
@@ -186,6 +206,7 @@ export class UsersAdminController {
   }
 
   @AdminRoles(...CONTENT_ROLES) @Get(':id') detail(@Param('id', Id) id: string) { return this.svc.detail(id); }
+  @AdminRoles(...MANAGER_ROLES) @Patch(':id') edit(@CurrentActor() a: Actor, @Param('id', Id) id: string, @Body(new Zod(EditDto)) b: z.infer<typeof EditDto>) { return this.svc.edit(a, id, b); }
   @AdminRoles(...MANAGER_ROLES) @HttpCode(202) @Post(':id/export') export1(@CurrentActor() a: Actor, @Param('id', Id) id: string) { return this.svc.startExport(a, id); }
   @AdminRoles(...MANAGER_ROLES) @HttpCode(202) @Delete(':id') remove(@CurrentActor() a: Actor, @Param('id', Id) id: string, @Body(new Zod(DeleteDto)) b: z.infer<typeof DeleteDto>) { return this.svc.startDelete(a, id, b.confirm); }
 }

@@ -74,6 +74,10 @@ export const users = pgTable('users', {
   betaBatchId: uuid('beta_batch_id'),
   createdByAdminId: uuid('created_by_admin_id'),
   seedPreset: varchar('seed_preset', { length: 20 }),
+  /** Free-text note an admin keeps about this person (e.g. what a beta tester is checking); never shown in the app. */
+  adminNote: varchar('admin_note', { length: 1000 }),
+  /** Contact e-mail an admin typed by hand. Not the login e-mail, not unique: it never blocks the person from registering with it. */
+  contactEmail: varchar('contact_email', { length: 254 }),
   /** Suspension (not community muting): login, refresh, API and sockets are refused while set. */
   suspendedAt: ts('suspended_at'),
   suspendedReason: varchar('suspended_reason', { length: 200 }),
