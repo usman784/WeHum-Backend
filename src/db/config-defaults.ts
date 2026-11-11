@@ -4,7 +4,7 @@ import { env } from '../config/env';
 export const CONFIG_DEFAULTS: Record<string, unknown> = {
   main: {
     minVersion: { ios: env.MIN_APP_VERSION_IOS, android: env.MIN_APP_VERSION_ANDROID }, maintenance: false,
-    features: { challenges: true, gratitude: false, breathwork: false, milestones: false, intent: false, streaks: true, hourlySits: false, heartRate: false },
+    features: { challenges: false, gratitude: false, breathwork: false, milestones: false, intent: false, streaks: true, hourlySits: false, heartRate: false },
     supportEmail: 'hello@wehum.app', defaultReminderTime: '07:00', languages: ['en'],
   },
   branding: { appName: 'WeHum', tagline: 'Meditate together', logoMediaId: null },
