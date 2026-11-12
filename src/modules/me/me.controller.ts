@@ -8,7 +8,7 @@ import { AppError } from '../../common/errors';
 import { Zod } from '../../common/zod';
 import { users } from '../../db/schema';
 import { DRIZZLE, type DB } from '../../infra/core.module';
-import { OnlineService } from '../../realtime/online.service';
+import { OnlineService, onlineUserOf } from '../../realtime/online.service';
 import { S3Service } from '../../infra/s3';
 import { AuthService } from '../auth/auth.service';
 import { UsernameService, validateUsername } from './username.service';
@@ -24,6 +24,12 @@ const PatchMe = z.object({
   timezone: tz.optional(),
   locale: z.string().max(10).optional(),
   country: z.string().regex(/^[A-Z]{2}$/).optional(),
+  /** City for the CMS city map; `null` clears it. The position is rounded to ~10 km here, whatever the app sends. */
+  city: z.object({
+    name: z.string().trim().min(1).max(80).transform((v) => v.replace(/[|\p{C}]/gu, '').trim()).refine((v) => v.length > 0, 'City name'),
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  }).nullable().optional(),
   theme: z.enum(['dark', 'light', 'system']).optional(),
   reminderEnabled: z.boolean().optional(),
   reminderTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm').optional(),
@@ -57,8 +63,12 @@ export class MeController {
   @Patch()
   async update(@CurrentUser() u: AppUser, @Body(new Zod(PatchMe)) b: z.infer<typeof PatchMe>) {
     if (u.isGuest && IDENTITY.some((k) => b[k] !== undefined)) throw new AppError('ACCOUNT_REQUIRED', 'Create an account to edit your profile');
-    const { username, bio, ...rest } = b;
+    const { username, bio, city, ...rest } = b;
     const patch: Partial<typeof users.$inferInsert> = { ...rest };
+    if (city !== undefined) {
+      const r1 = (n: number) => Math.round(n * 10) / 10; // ~10 km: a city, never a street
+      Object.assign(patch, city ? { city: city.name, cityLat: r1(city.lat), cityLng: r1(city.lng) } : { city: null, cityLat: null, cityLng: null });
+    }
     if (bio !== undefined) patch.bio = bio ? bio : null;
     if (username !== undefined) {
       const [cur] = await this.db.select({ username: users.username, usernameChangedAt: users.usernameChangedAt }).from(users).where(eq(users.id, u.id));
@@ -77,8 +87,10 @@ export class MeController {
     }
     const me = await this.auth.me(u.id);
     // hiding (or changing) the country takes the user off that country on the CMS map at once
-    if (b.showCountry !== undefined || b.country !== undefined)
-      await this.online.setMeta({ id: u.id, isGuest: me.isGuest, country: me.showCountry ? me.country : null }).catch(() => null);
+    if (b.showCountry !== undefined || b.country !== undefined || b.city !== undefined) {
+      const [row] = await this.db.select({ id: users.id, isGuest: users.isGuest, country: users.country, showCountry: users.showCountry, city: users.city, cityLat: users.cityLat, cityLng: users.cityLng }).from(users).where(eq(users.id, u.id));
+      if (row) await this.online.setMeta(onlineUserOf(row)).catch(() => null);
+    }
     return me;
   }
 

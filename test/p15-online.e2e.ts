@@ -8,6 +8,7 @@ import { K, REDIS } from '../src/infra/redis';
 import { ONLINE_STALE_MS, OnlineService } from '../src/realtime/online.service';
 import { RealtimeTicker } from '../src/realtime/ticker';
 import { account, adminToken, clearRates, guest, http, makeAdmin, resetTestDb } from './helpers';
+import { randomUUID as uuid } from 'node:crypto';
 import { emit, mustConnect, recorder, sleep, startPod, waitFor } from './realtime-helpers';
 
 let pod: Awaited<ReturnType<typeof startPod>>;
@@ -28,7 +29,7 @@ beforeAll(async () => {
   online = app.get(OnlineService);
   db = new Client({ connectionString: process.env.DATABASE_URL }); await db.connect();
 });
-beforeEach(async () => { await clearRates(); await redis.del(K.onlineZ, K.onlineMeta, K.dashKpisLast, ...(await redis.keys('on:s:*'))); (app.get(RealtimeTicker) as any).lastKpis = ''; }); // eslint-disable-line @typescript-eslint/no-explicit-any
+beforeEach(async () => { await clearRates(); await redis.del(K.onlineZ, K.onlineMeta, K.onlineCity, K.dashKpisLast, ...(await redis.keys('on:s:*'))); (app.get(RealtimeTicker) as any).lastKpis = ''; }); // eslint-disable-line @typescript-eslint/no-explicit-any
 afterEach(async () => { for (const s of sockets) s.close(); sockets = []; await sleep(50); });
 afterAll(async () => { await db?.end(); await pod?.stop(); });
 
@@ -155,6 +156,43 @@ describe('online now', () => {
     const after = await online.counts();
     expect(after.total).toBe(1); // still counted…
     expect(after.countries).toEqual([]); // …but on no country
+  });
+
+  it('cities: the app sends a city, the server rounds the position to ~10 km, the CMS gets online and meditating cities live; hiding the country hides the city', async () => {
+    const [a, b, c, h] = [await account(app), await account(app), await account(app), await account(app)];
+    for (const [u, country] of [[a, 'PK'], [b, 'PK'], [c, 'DE'], [h, 'FR']] as const) await setCountry(u.me.id, country);
+    // a bad city is refused; a good one is rounded (31.5204 -> 31.5), never stored at full precision
+    expect((await http(app).patch('/v1/me', { city: { name: '', lat: 1, lng: 1 } }, { token: a.accessToken })).status).toBe(400);
+    expect((await http(app).patch('/v1/me', { city: { name: 'Lahore', lat: 91, lng: 1 } }, { token: a.accessToken })).status).toBe(400);
+    const set = (u: typeof a, name: string, lat: number, lng: number) => http(app).patch('/v1/me', { city: { name, lat, lng } }, { token: u.accessToken });
+    expect((await set(a, 'Lahore', 31.5204, 74.3587)).status).toBe(200);
+    await set(b, 'Lahore', 31.5401, 74.4099); await set(c, 'Berlin', 52.5200, 13.4050); await set(h, 'Paris', 48.8566, 2.3522);
+    expect((await db.query('SELECT city, city_lat, city_lng FROM users WHERE id = $1', [a.me.id])).rows[0]).toEqual({ city: 'Lahore', city_lat: 31.5, city_lng: 74.4 });
+    await http(app).patch('/v1/me', { showCountry: false }, { token: h.accessToken }); // Paris: hidden with the country
+
+    for (const u of [a, b, c, h]) await live(u.accessToken);
+    await waitFor(async () => (await online.total()) === 4);
+    const sid = uuid(), sA = await live(a.accessToken);
+    await emit(sA, 'presence:start', { meditationId: uuid(), sessionId: sid, kind: 'motd', lengthMin: 30, mode: 'solo' });
+
+    const owner = track(await mustConnect(pod.url, '/admin', { token: await adminToken(app, await makeAdmin(db, 'owner')) }));
+    const rec = recorder(owner, 'dashboard:kpis');
+    await emit(owner, 'subscribe', { channels: ['dashboard'] });
+    await app.get(RealtimeTicker).kpiTick();
+    const [k] = await rec.wait('dashboard:kpis', 1, (p) => (p.onlineCities ?? []).length > 0);
+    expect(k.onlineCities).toEqual([{ c: 'PK', name: 'Lahore', lat: 31.5, lng: 74.4, n: 2 }, { c: 'DE', name: 'Berlin', lat: 52.5, lng: 13.4, n: 1 }]);
+    expect(k.meditatingCities).toEqual([{ c: 'PK', name: 'Lahore', lat: 31.5, lng: 74.4, n: 1 }]);
+
+    // leaving removes the city at once; a person with the app closed is on no city
+    for (const s of sockets) s.close();
+    await waitFor(async () => (await online.total()) === 0);
+    expect((await online.cities()).online).toEqual([]);
+    // clearing the city (null) takes it off even while online
+    const again = await live(a.accessToken);
+    await waitFor(async () => (await online.cities()).online.length === 1);
+    expect((await http(app).patch('/v1/me', { city: null }, { token: a.accessToken })).status).toBe(200);
+    expect((await online.cities()).online).toEqual([]);
+    again.close();
   });
 
   it('only content roles may watch who is online', async () => {

@@ -41,6 +41,7 @@ export function toMe(u: U, ids: I[], e: E, avatarUrl: string | null = null, acce
     isGuest: u.isGuest,
     providers: [...new Set(ids.map((i) => i.provider).filter((p) => p !== 'device'))],
     country: u.country,
+    city: u.city,
     timezone: u.timezone,
     locale: u.locale,
     theme: u.theme,

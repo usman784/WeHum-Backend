@@ -7,7 +7,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint, bigserial, boolean, char, check, customType, date, index, inet, integer, jsonb, numeric,
-  pgEnum, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, uuid, varchar,
+  pgEnum, pgTable, primaryKey, real, smallint, text, timestamp, uniqueIndex, uuid, varchar,
 } from 'drizzle-orm/pg-core';
 
 const citext = customType<{ data: string }>({ dataType: () => 'citext' });
@@ -58,6 +58,10 @@ export const users = pgTable('users', {
   emailVerifiedAt: ts('email_verified_at'),
   isGuest: boolean('is_guest').notNull().default(true),
   country: char('country', { length: 2 }),
+  /** City for the CMS city map: the name and a position rounded to ~10 km (the server rounds), shown only while "show my country" is on. */
+  city: varchar('city', { length: 80 }),
+  cityLat: real('city_lat'),
+  cityLng: real('city_lng'),
   timezone: varchar('timezone', { length: 64 }).notNull().default('UTC'),
   locale: varchar('locale', { length: 10 }).notNull().default('en'),
   theme: themePref('theme').notNull().default('dark'),

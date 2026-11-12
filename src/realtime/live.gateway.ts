@@ -18,7 +18,7 @@ import { LiveService, silenceLive } from '../modules/live/live.service';
 import { MotdService, addDaysIso, utcToday } from '../modules/motd/motd.service';
 import { GroupService, isGlobalSlot, slotDate } from '../modules/today/group.service';
 import { LobbyService } from './lobby.service';
-import { ONLINE_TOUCH_MS, OnlineService } from './online.service';
+import { ONLINE_TOUCH_MS, OnlineService, onlineUserOf, type OnlineUser } from './online.service';
 import { PresenceService } from './presence.service';
 import { connectError, fail, limitEvents, ok, safely, watchExpiry } from './socket-util';
 import { metrics } from '../infra/metrics';
@@ -44,7 +44,7 @@ const slot = z.string().regex(/^(G\d{4}-\d{2}-\d{2}|\d{4}-\d{2}-\d{2}(T([01]\d|2
 const LobbyRef = z.object({ date: slot }).strict();
 const Refresh = z.object({ token: z.string().min(20).max(4096) }).strict();
 
-interface LiveSocketData { user: { id: string; isGuest: boolean; country: string | null }; installId?: string; ver: number; exp: number; rooms: Set<string>; lobbies: Set<string>; clear?: () => void }
+interface LiveSocketData { user: OnlineUser; installId?: string; ver: number; exp: number; rooms: Set<string>; lobbies: Set<string>; clear?: () => void }
 type LiveSocket = Socket & { data: LiveSocketData };
 
 /** `/live`: the mobile app (spec §7.2). Websocket only; the server keeps no per-socket state that a reconnect cannot rebuild. */
@@ -87,10 +87,10 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const main = await this.config.value<MainConfig>('main');
     const min = a.platform === 'ios' || a.platform === 'android' ? main.minVersion[a.platform] : undefined;
     if (min && a.appVersion && compareVersions(a.appVersion, min) < 0) throw connectError('UPDATE_REQUIRED');
-    const [u] = await this.db.select({ isGuest: users.isGuest, country: users.country, showCountry: users.showCountry, deletedAt: users.deletedAt, deletingAt: users.deletingAt, suspendedAt: users.suspendedAt }).from(users).where(eq(users.id, c.sub));
+    const [u] = await this.db.select({ isGuest: users.isGuest, country: users.country, showCountry: users.showCountry, city: users.city, cityLat: users.cityLat, cityLng: users.cityLng, deletedAt: users.deletedAt, deletingAt: users.deletingAt, suspendedAt: users.suspendedAt }).from(users).where(eq(users.id, c.sub));
     if (!u || u.deletedAt || u.deletingAt) throw connectError('GONE');
     if (u.suspendedAt) throw connectError('ACCOUNT_SUSPENDED');
-    socket.data = { user: { id: c.sub, isGuest: u.isGuest, country: u.showCountry ? u.country : null }, installId: a.installId, ver: c.ver, exp: c.exp, rooms: new Set(), lobbies: new Set() };
+    socket.data = { user: onlineUserOf({ id: c.sub, ...u }), installId: a.installId, ver: c.ver, exp: c.exp, rooms: new Set(), lobbies: new Set() };
   }
 
   handleConnection(socket: LiveSocket) {
@@ -154,9 +154,9 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       const all = [...this.local.values()];
       for (let i = 0; i < all.length; i += 500) {
         const batch = all.slice(i, i + 500);
-        const rows = await this.db.select({ id: users.id, isGuest: users.isGuest, country: users.country, showCountry: users.showCountry }).from(users)
+        const rows = await this.db.select({ id: users.id, isGuest: users.isGuest, country: users.country, showCountry: users.showCountry, city: users.city, cityLat: users.cityLat, cityLng: users.cityLng }).from(users)
           .where(inArray(users.id, batch.map((b) => b.user.id))).catch(() => []);
-        const fresh = new Map(rows.map((r) => [r.id, { id: r.id, isGuest: r.isGuest, country: r.showCountry ? r.country : null }]));
+        const fresh = new Map(rows.map((r) => [r.id, onlineUserOf(r)]));
         await Promise.all(batch.map((b) => {
           b.user = fresh.get(b.user.id) ?? b.user;
           return this.cameOnline(b.user, [...b.sockets]);

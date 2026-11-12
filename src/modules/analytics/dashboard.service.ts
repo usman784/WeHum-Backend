@@ -35,7 +35,7 @@ export class DashboardService {
       this.analytics.topSessions(7, 5),
       this.db.execute<{ date: string; title: string; lengths: number[] }>(sql`SELECT d.date::text, s.title, coalesce((SELECT array_agg(v.length_min ORDER BY v.length_min) FROM motd_variants v JOIN media_assets a ON a.id = v.media_id AND a.status = 'ready' WHERE v.date = d.date), '{}') AS lengths FROM motd_days d JOIN sessions s ON s.id = d.session_id WHERE d.date >= ${today}::date AND d.date <= ${addDay(today, 7)}::date ORDER BY d.date`).then((r) => r.rows),
       this.group.next(now),
-      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; silenceCountries?: { c: string; n: number }[]; streaks7?: number; onlineNow?: number; onlineGuests?: number; onlineCountries?: { c: string; n: number }[] }) : null)).catch(() => null),
+      this.redis.get(K.dashKpisLast).then((v) => (v ? (JSON.parse(v) as { silenceNow?: number; silenceCountries?: { c: string; n: number }[]; streaks7?: number; onlineNow?: number; onlineGuests?: number; onlineCountries?: { c: string; n: number }[]; onlineCities?: unknown[]; meditatingCities?: unknown[] }) : null)).catch(() => null),
     ]);
     // the leader counts who is online every 5 s; count here only when it has not yet (fresh start, tests)
     const online = extras?.onlineNow !== undefined ? { total: extras.onlineNow, guests: extras.onlineGuests ?? 0, countries: extras.onlineCountries ?? [] } : await this.online.counts(now).catch(() => null);
@@ -55,6 +55,7 @@ export class DashboardService {
         payingMembers: summary.payingMembers.total, inTrial: summary.inTrial, mrrUsd: summary.mrrUsd, library: lib,
         silenceNow: extras?.silenceNow ?? 0, silenceCountries: extras?.silenceCountries ?? [], streaks7: extras?.streaks7 ?? 0,
         liveTop: agg?.top ?? [], onlineNow: online?.total ?? 0, onlineGuests: online?.guests ?? 0, onlineCountries: online?.countries ?? [],
+        onlineCities: extras?.onlineCities ?? [], meditatingCities: extras?.meditatingCities ?? [],
       },
       moderationOpen: open,
       dailyMessages: week.map((d) => ({ date: d, title: byDate.get(d)?.title ?? null, type: byDate.get(d)?.type ?? null, status: byDate.get(d)?.status ?? 'missing' })),

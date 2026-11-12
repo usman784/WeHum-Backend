@@ -128,7 +128,7 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
   // ── dashboard
   async kpis(now = Date.now()) {
     const date = utcDay(now);
-    const [snap, meds, mins, subs, founding, flagged, silence, runs, online] = await Promise.all([
+    const [snap, meds, mins, subs, founding, flagged, silence, runs, online, cities] = await Promise.all([
       this.live.snapshot(date), this.redis.get(K.medsToday(date)), this.redis.get(K.minsToday(date)),
       this.subscriptionCounts(),
       this.db.select().from(offers).where(eq(offers.id, 'founding')).then((r) => r[0]),
@@ -136,13 +136,14 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
       this.live.silence(now).catch(() => null),
       this.sevenDayRuns(),
       this.online.counts(now).catch(() => null),
+      this.online.cities(now).catch(() => null),
     ]);
     return {
       liveNow: snap.total ?? 0, meditationsToday: Number(meds) || 0, minutesToday: Number(mins) || 0,
       payingMembers: subs.paying, inTrial: subs.trial, mrrUsd: subs.mrrUsd,
       founding: { taken: founding?.taken ?? 0, cap: founding?.cap ?? 0, open: !!founding?.open && (founding.taken < founding.cap) },
       moderationOpen: flagged, silenceNow: silence?.people ?? 0, silenceCountries: silence?.top ?? [], streaks7: runs,
-      onlineNow: online?.total ?? 0, onlineGuests: online?.guests ?? 0, onlineCountries: online?.countries ?? [], at: now,
+      onlineNow: online?.total ?? 0, onlineGuests: online?.guests ?? 0, onlineCountries: online?.countries ?? [], onlineCities: cities?.online ?? [], meditatingCities: cities?.meditating ?? [], at: now,
     };
   }
 

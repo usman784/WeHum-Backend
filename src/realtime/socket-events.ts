@@ -85,7 +85,8 @@ export interface AdminClientToServer {
 export interface AdminServerToClient {
   'entity:changed': (p: { type: EntityType; id: string; op: 'create' | 'update' | 'delete'; version: number; by: { id: string; name: string } | null }) => void;
   'dashboard:kpis': (p: { liveNow: number; meditationsToday: number; minutesToday: number; payingMembers: number; inTrial: number; mrrUsd: number; founding: { taken: number; cap: number; open: boolean }; moderationOpen: number; silenceNow?: number; silenceCountries?: { c: string; n: number }[];
-    onlineNow?: number; onlineGuests?: number; onlineCountries?: { c: string; n: number }[]; at: number }) => void;
+    onlineNow?: number; onlineGuests?: number; onlineCountries?: { c: string; n: number }[];
+    onlineCities?: { c: string; name: string; lat: number; lng: number; n: number }[]; meditatingCities?: { c: string; name: string; lat: number; lng: number; n: number }[]; at: number }) => void;
   'live:agg': (p: LiveAgg) => void;
   'moderation:new': (p: { dedication: unknown; flags: string[] }) => void;
   'moderation:count': (p: { open: number }) => void;
