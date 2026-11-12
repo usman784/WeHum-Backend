@@ -153,6 +153,7 @@ describe('P8 daily nudge', () => {
 
   it('a live message of the day and the nudge are one push (with the message), unless the person opted out of message pushes', async () => {
     const now = Date.parse('2026-11-10T09:00:00Z');
+    await q(`DELETE FROM daily_messages WHERE date = '2026-11-10'`); // the seed may already hold this day (it seeds around today)
     await q(`INSERT INTO daily_messages (date, type, title, text, status) VALUES ('2026-11-10','text','Between two breaths','x','live')`);
     const wants = await phone({ reminder: '09:00' });
     const declined = await phone({ reminder: '09:00' });
