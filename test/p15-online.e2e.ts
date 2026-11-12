@@ -195,6 +195,24 @@ describe('online now', () => {
     again.close();
   });
 
+  it('the app\'s live map gets cities of people meditating now, only cities with 3+ people (a lone person is never a dot)', async () => {
+    const people = [] as Awaited<ReturnType<typeof account>>[];
+    for (let i = 0; i < 4; i++) people.push(await account(app));
+    const cities: [string, string, number, number][] = [['PK', 'Lahore', 31.5, 74.4], ['PK', 'Lahore', 31.5, 74.4], ['PK', 'Lahore', 31.5, 74.4], ['DE', 'Berlin', 52.5, 13.4]];
+    for (const [i, [cc, name, lat, lng]] of cities.entries()) {
+      await setCountry(people[i]!.me.id, cc);
+      await http(app).patch('/v1/me', { city: { name, lat, lng } }, { token: people[i]!.accessToken });
+    }
+    const watcher = await live((await account(app)).accessToken);
+    const rec = recorder(watcher, 'live:agg');
+    await emit(watcher, 'room:join', { room: 'world' });
+    const sid = uuid();
+    for (const p of people) { const s = await live(p.accessToken); await emit(s, 'presence:start', { meditationId: uuid(), sessionId: sid, kind: 'motd', lengthMin: 10, mode: 'solo' }); }
+    await app.get(RealtimeTicker).presenceTick();
+    const [agg] = await rec.wait('live:agg', 1, (p) => (p.cities ?? []).length > 0);
+    expect(agg.cities).toEqual([{ c: 'PK', name: 'Lahore', lat: 31.5, lng: 74.4, n: 3 }]); // Berlin has one person: not shown
+  });
+
   it('only content roles may watch who is online', async () => {
     const mod = track(await mustConnect(pod.url, '/admin', { token: await adminToken(app, await makeAdmin(db, 'moderator')) }));
     expect((await emit<{ denied?: string[] }>(mod, 'subscribe', { channels: ['users'] })).data!.denied).toEqual(['users']);

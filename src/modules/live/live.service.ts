@@ -18,6 +18,8 @@ export interface LiveSnapshot {
   todayTop: { c: string; n: number }[];
   /** The same people grouped into Americas / EMEA / APAC (hidden countries are not in a belt). */
   belts?: BeltCounts;
+  /** Cities of people meditating now, only cities with at least PUBLIC_CITY_MIN people (the app's maps; the ticker adds it). */
+  cities?: { c: string; name: string; lat: number; lng: number; n: number }[];
   quiet: boolean;
   meditatedToday: number | null;
   vibration: number;
@@ -39,14 +41,14 @@ export class LiveService {
   async snapshot(date: string): Promise<LiveSnapshot> {
     const today = await this.config.value<TodayConfig>('today');
     try {
-      const [agg, meds, vib, doneByCountry] = await Promise.all([this.redis.hgetall(K.aggCountry), this.redis.get(K.medsToday(date)), this.redis.get(K.vibration), this.redis.hgetall(K.medsTodayCountry(date))]);
+      const [agg, meds, vib, doneByCountry, citiesJson] = await Promise.all([this.redis.hgetall(K.aggCountry), this.redis.get(K.medsToday(date)), this.redis.get(K.vibration), this.redis.hgetall(K.medsTodayCountry(date)), this.redis.get(K.liveCities)]);
       const all = Object.entries(agg).map(([c, n]) => ({ c, n: Number(n) })).filter((e) => e.n > 0);
       const total = all.reduce((s, e) => s + e.n, 0); // everyone counts…
       const entries = all.filter((e) => e.c !== HIDDEN_COUNTRY).sort((a, b) => b.n - a.n || a.c.localeCompare(b.c)); // …but hidden countries are never shown
       const meditatedToday = Number(meds) || 0;
       const todayTop = Object.entries(doneByCountry).map(([c, n]) => ({ c, n: Number(n) })).filter((e) => e.n > 0 && e.c !== HIDDEN_COUNTRY).sort((a, b) => b.n - a.n || a.c.localeCompare(b.c)).slice(0, 50);
       return {
-        total, countries: entries.length, top: entries.slice(0, 50), todayTop, belts: beltsOf(entries), quiet: total < today.emptyRoomThreshold, meditatedToday,
+        total, countries: entries.length, top: entries.slice(0, 50), todayTop, belts: beltsOf(entries), cities: citiesJson ? (JSON.parse(citiesJson) as NonNullable<LiveSnapshot['cities']>) : [], quiet: total < today.emptyRoomThreshold, meditatedToday,
         vibration: Number(vib) || 0, at: Date.now(), line: liveLine(total, meditatedToday, today.emptyRoomThreshold),
       };
     } catch (e) {

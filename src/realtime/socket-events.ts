@@ -12,6 +12,7 @@ export interface LiveAgg {
   top: { c: string; n: number }[]; // ISO-2, top 50
   todayTop?: { c: string; n: number }[]; // where people meditated today (ISO-2, top 50)
   belts?: { americas: number; emea: number; apac: number }; // the same people grouped (Stitch)
+  cities?: { c: string; name: string; lat: number; lng: number; n: number }[]; // cities with 3+ people meditating now (position rounded to ~10 km)
   quiet: boolean;             // total < emptyRoomThreshold
   meditatedToday: number;
   vibration: number;          // 0–100

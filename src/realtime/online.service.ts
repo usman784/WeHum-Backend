@@ -96,6 +96,8 @@ local med = tally(redis.call('ZRANGEBYSCORE', KEYS[3], ARGV[2], '+inf'), KEYS[2]
 return { online, med }`;
 
 export interface OnlineCounts { total: number; guests: number; countries: { c: string; n: number }[] }
+/** The app's maps show a city only with at least this many people meditating there (a single person is never a dot). */
+export const PUBLIC_CITY_MIN = 3;
 /** A city on the CMS map: name, country, position rounded to ~10 km, and how many people. Never who. */
 export interface CityCount { c: string; name: string; lat: number; lng: number; n: number }
 export interface OnlineUser { id: string; isGuest: boolean; country: string | null; city?: { name: string; lat: number; lng: number } | null }

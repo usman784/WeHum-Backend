@@ -14,7 +14,7 @@ import { addDaysIso } from '../modules/motd/motd.service';
 import { GroupStartService } from './group-start.service';
 import { LobbyService } from './lobby.service';
 import { GroupService } from '../modules/today/group.service';
-import { OnlineService } from './online.service';
+import { OnlineService, PUBLIC_CITY_MIN } from './online.service';
 import { PresenceService } from './presence.service';
 import { metrics } from '../infra/metrics';
 import { vibration } from './vibration';
@@ -63,10 +63,12 @@ export class RealtimeTicker implements OnModuleInit, OnApplicationShutdown {
     await this.presence.sweep(now);
     await this.onlineSweep(now).catch((e) => this.log.warn(`online sweep failed: ${(e as Error).message}`));
     const snap = await this.live.snapshot(utcDay(now));
+    snap.cities = ((await this.online.cities(now).catch(() => null))?.meditating ?? []).filter((c) => c.n >= PUBLIC_CITY_MIN);
+    await this.redis.set(K.liveCities, JSON.stringify(snap.cities), 'EX', 120); // every other live snapshot (join, REST) reads it
     metrics.presenceLive.set(snap.total ?? 0);
     metrics.presenceTickLag.set(Date.now() - started);
     metrics.presenceTickAt.set(Date.now() / 1000);
-    const key = hash({ t: snap.total, c: snap.countries, top: snap.top, tt: snap.todayTop, q: snap.quiet, m: snap.meditatedToday, v: snap.vibration });
+    const key = hash({ t: snap.total, c: snap.countries, top: snap.top, tt: snap.todayTop, ci: snap.cities, q: snap.quiet, m: snap.meditatedToday, v: snap.vibration });
     await this.redis.set(K.liveAggLast, JSON.stringify(snap), 'EX', 3600);
     // the day's highest number of people meditating together; the rollup writes it to `daily_aggregates.peak_live`
     const peakKey = `live:peak:${utcDay(now)}`;

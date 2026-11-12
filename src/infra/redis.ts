@@ -46,6 +46,7 @@ export const K = {
   leader: 'scheduler:leader',
   onlineZ: 'on:z', // user → last touch (ms): who has the app open
   onlineMeta: 'on:m', // user → "CC|g" or "CC|a" (country, guest or account)
+  liveCities: 'live:cities', // cities with 3+ people meditating now (JSON), written by the ticker every few seconds, read by every live snapshot
   onlineCity: 'on:c', // user → "CC|City|lat|lng" (only users who share a city)
   onlineSockets: (userId: string) => `on:s:${userId}`, // socket id → last touch: the user's open apps on every pod
 } as const;
