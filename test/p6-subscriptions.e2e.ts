@@ -214,6 +214,21 @@ describe('P6 admin APIs', () => {
     expect((await q(`SELECT 1 FROM audit_log WHERE action='user.gift' AND target_id=$1`, [u])).length).toBe(1);
   });
 
+  it('create member: owner/admin only; email+password account that can log in, yearly premium granted, duplicate refused, audited', async () => {
+    subscriber = { entitlements: { premium: { product_identifier: 'wehum_annual', expires_date: new Date(Date.now() + 366 * DAY).toISOString(), purchase_date: new Date().toISOString() } }, subscriptions: { wehum_annual: { period_type: 'promotional', store: 'promotional' } } };
+    const body = { email: 'Web.Buyer@Example.com', password: 'longenough-1', firstName: 'Web', plan: 'yearly' };
+    expect((await http(app).post('/v1/admin/users', body, { token: editor })).status).toBe(403);
+    expect((await http(app).post('/v1/admin/users', { ...body, password: 'short' }, { token: adminTok })).status).toBe(400);
+    const r = await http(app).post('/v1/admin/users', body, { token: adminTok });
+    expect(r.status).toBe(201);
+    expect(r.body.data.active).toBe(true);
+    expect(await ent(r.body.data.id)).toMatchObject({ active: true, store: 'promotional' });
+    const login = await http(app).post('/v1/auth/email/login', { email: 'web.buyer@example.com', password: 'longenough-1' }, { headers: { 'x-forwarded-for': '7.7.7.7' } });
+    expect(login.status).toBe(200);
+    expect((await http(app).post('/v1/admin/users', body, { token: adminTok })).status).toBe(409);
+    expect((await q(`SELECT 1 FROM audit_log WHERE action='user.create' AND target_id=$1`, [r.body.data.id])).length).toBe(1);
+  });
+
   it('end the Founding offer: owner/admin only, once, audited, offering switched', async () => {
     await q(`UPDATE offers SET open = true, closed_at = NULL WHERE id='founding'`);
     expect((await http(app).post('/v1/admin/offers/founding/close', {}, { token: editor })).status).toBe(403);

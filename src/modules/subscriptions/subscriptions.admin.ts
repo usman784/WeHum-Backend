@@ -17,12 +17,19 @@ import { cursorQuery, IdParam } from '../admin/dto';
 import { FOUNDING_PRODUCT, RcProcessor } from './rc.processor';
 import { RevenueCatClient } from './revenuecat.client';
 import { env } from '../../config/env';
+import { AuthService } from '../auth/auth.service';
 import { toCsv } from '../users-admin/user-data.service';
 
 const Tabs = ['all', 'trial', 'annual', 'monthly', 'problem', 'cancelled'] as const;
 const MembersQuery = z.object({ tab: z.enum(Tabs).default('all'), ...cursorQuery });
 const EventsQuery = z.object(cursorQuery);
 const GiftDto = z.object({ days: z.number().int().min(1).max(365) }).strict();
+const PLAN_DAYS = { monthly: 31, yearly: 366 } as const;
+const CreateMemberDto = z.object({
+  email: z.string().email().max(254), password: z.string().min(8).max(128),
+  firstName: z.string().trim().max(60).optional(), lastName: z.string().trim().max(60).optional(),
+  plan: z.enum(['none', 'monthly', 'yearly']).default('none'),
+}).strict();
 const IdP = new Zod(IdParam);
 
 const isMonthly = sql`${entitlements.productId} ilike '%monthly%'`;
@@ -30,7 +37,7 @@ const live = sql`${entitlements.active} and (${entitlements.expiresAt} is null o
 
 @Injectable()
 export class SubscriptionsAdminService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly writer: AdminWriter, private readonly rc: RevenueCatClient, private readonly proc: RcProcessor) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DB, @Inject(REDIS) private readonly redis: Redis, private readonly writer: AdminWriter, private readonly rc: RevenueCatClient, private readonly proc: RcProcessor, private readonly auth: AuthService) {}
 
   /** KPIs of the Subscriptions screen. Money is from the events' own USD price (spec §8.4), never invented. */
   async summary() {
@@ -130,6 +137,14 @@ export class SubscriptionsAdminService {
     return this.summary().then((s) => s.founding);
   }
 
+  /** Website buyers: an email + password account made by an admin, optionally with a monthly or yearly premium. */
+  async createMember(actor: Actor, b: z.infer<typeof CreateMemberDto>) {
+    const id = await this.auth.createByAdmin(b);
+    await this.writer.run(actor, { action: 'user.create', type: 'user', id }, async () => ({ result: null, after: { email: b.email.toLowerCase(), plan: b.plan } }));
+    if (b.plan === 'none') return { id, active: false, expiresAt: null };
+    return { id, ...(await this.gift(actor, id, PLAN_DAYS[b.plan])) };
+  }
+
   /** Support gift: free premium for N days through RevenueCat, then the entitlement is re-read. */
   async gift(actor: Actor, userId: string, days: number) {
     const [u] = await this.db.select({ id: users.id }).from(users).where(eq(users.id, userId));
@@ -157,5 +172,6 @@ export class SubscriptionsAdminController {
   @AdminRoles(...CONTENT_ROLES) @Get('subscriptions/members') members(@Query(new Zod(MembersQuery)) q: z.infer<typeof MembersQuery>) { return this.subs.members(q); }
   @AdminRoles(...CONTENT_ROLES) @Get('subscriptions/events') events(@Query(new Zod(EventsQuery)) q: z.infer<typeof EventsQuery>) { return this.subs.events(q); }
   @AdminRoles(...MANAGER_ROLES) @HttpCode(200) @Post('offers/founding/close') close(@CurrentActor() a: Actor) { return this.subs.closeFounding(a); }
+  @AdminRoles(...MANAGER_ROLES) @HttpCode(201) @Post('users') createMember(@CurrentActor() a: Actor, @Body(new Zod(CreateMemberDto)) b: z.infer<typeof CreateMemberDto>) { return this.subs.createMember(a, b); }
   @AdminRoles(...MANAGER_ROLES) @HttpCode(200) @Post('users/:id/gift') gift(@CurrentActor() a: Actor, @Param('id', IdP) id: string, @Body(new Zod(GiftDto)) b: z.infer<typeof GiftDto>) { return this.subs.gift(a, id, b.days); }
 }

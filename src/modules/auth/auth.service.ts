@@ -177,6 +177,18 @@ export class AuthService {
     return id;
   }
 
+  /** CMS: a ready email + password account (email already verified), e.g. for a person who bought on the website. */
+  async createByAdmin(b: { email: string; password: string; firstName?: string; lastName?: string }) {
+    const email = b.email.toLowerCase();
+    if ((await this.findIdentity('email', email)) || (await this.db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1)).length) throw new AppError('ALREADY_EXISTS', 'An account with this email already exists');
+    const passwordHash = await argon2.hash(b.password, { type: argon2.argon2id });
+    return this.db.transaction(async (tx) => {
+      const id = await this.newAccount(tx, { email, emailVerified: true, firstName: b.firstName, lastName: b.lastName });
+      await tx.insert(authIdentities).values({ id: uuid(), userId: id, provider: 'email', providerUid: email, passwordHash });
+      return id;
+    });
+  }
+
   private async mergeTokenFor(guestId: string) {
     const t = opaqueToken();
     await this.redis.set(K.mergeToken(t), guestId, 'EX', MERGE_TTL);
